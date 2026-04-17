@@ -26,7 +26,8 @@ public abstract class LevelLoadingScreenMixin {
    private static final int TEXT_PADDING = 20;
    private static final int LINE_SPACING = 2;
    private static final int MAX_TEXT_WIDTH = 420;
-   private static final int BASELINE_OFFSET = 56;
+   private static final int LOADING_WIDGET_HALF_HEIGHT = 100;
+   private static final int LOADING_WIDGET_TEXT_GAP = 16;
    private static final List<Component> CONTRIBUTIONS = List.of(
       Component.literal("Land cover: © ESA WorldCover project / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium."),
       Component.literal("Climate zones: Köppen–Geiger climate classification (Beck et al., 2018) — CC BY 4.0."),
@@ -68,10 +69,7 @@ public abstract class LevelLoadingScreenMixin {
          if (!lines.isEmpty()) {
             int totalHeight = lines.size() * font.lineHeight + (lines.size() - 1) * LINE_SPACING;
             int centerX = width / 2;
-            int baseY = height / 2 + BASELINE_OFFSET;
-            int maxY = height - totalHeight - TEXT_PADDING;
-            int startY = Math.min(baseY, maxY);
-            int y = Math.max(TEXT_PADDING, startY);
+            int y = tellus$getTextY(height, totalHeight);
 
             for (FormattedCharSequence line : lines) {
                int lineWidth = font.width(line);
@@ -81,5 +79,17 @@ public abstract class LevelLoadingScreenMixin {
             }
          }
       }
+   }
+
+   private static int tellus$getTextY(int height, int totalHeight) {
+      int centerY = height / 2;
+      int bottomY = height - totalHeight - TEXT_PADDING;
+      int belowLoadingWidgetY = centerY + LOADING_WIDGET_HALF_HEIGHT + LOADING_WIDGET_TEXT_GAP;
+      if (belowLoadingWidgetY <= bottomY) {
+         return belowLoadingWidgetY;
+      }
+
+      int aboveLoadingWidgetY = centerY - LOADING_WIDGET_HALF_HEIGHT - LOADING_WIDGET_TEXT_GAP - totalHeight;
+      return Math.max(TEXT_PADDING, Math.min(aboveLoadingWidgetY, bottomY));
    }
 }

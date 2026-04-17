@@ -14,10 +14,11 @@ import net.minecraft.util.Mth;
 
 public final class DhLodWaterResolver {
    private static final int ESA_NO_DATA = 0;
-   private static final int ESA_WATER = 80;
    private static final int ESA_MANGROVES = 95;
    private static final int MAX_RASTER_CACHE = intProperty("tellus.dhWaterRasterCacheSize", 128, 16, 2048);
    private static final int[] SAMPLE_OFFSETS_SINGLE = new int[]{0, 0};
+   private static final int[] SAMPLE_OFFSETS_CELL_2 = new int[]{-1, -1, 0, -1, -1, 0, 0, 0};
+   private static final int[] SAMPLE_OFFSETS_SMALL_GRID = new int[]{-1, -1, 0, -1, 1, -1, -1, 0, 0, 0, 1, 0, -1, 1, 0, 1, 1, 1};
    private static final int[] NEIGHBOR_OFFSETS = new int[]{1, 0, -1, 0, 0, 1, 0, -1};
    private final EarthChunkGenerator generator;
    private final EarthGeneratorSettings settings;
@@ -58,6 +59,11 @@ public final class DhLodWaterResolver {
          int[] waterSurface = Arrays.copyOf(baseTerrainSurface, area);
          boolean[] hasWater = new boolean[area];
          boolean[] ocean = new boolean[area];
+         boolean osmWaterEnabled = this.settings.enableWater();
+         double worldScale = this.settings.worldScale();
+         boolean[] renderWater = rasterized.renderWater();
+         boolean[] rasterizedOcean = rasterized.ocean();
+         boolean[] sampledOcean = rasterized.sampledOcean();
          int seaLevel = this.generator.getSeaLevel();
 
          for (int localZ = 0; localZ < lodSizePoints; localZ++) {
@@ -70,30 +76,24 @@ public final class DhLodWaterResolver {
                int worldX = worldXs[localX];
                int coverClass = coverClasses[index];
                int surface = terrainSurface[index];
-               boolean overtureWater = this.settings.enableWater() && rasterized.renderWater()[index];
-               boolean overtureOcean = overtureWater && rasterized.ocean()[index];
-               boolean sampledWater = rasterized.sampledWater()[index];
-               boolean sampledOcean = sampledWater && rasterized.sampledOcean()[index];
-               TellusLandMaskSource.LandMaskSample landMaskSample = this.landMaskSource.sampleLandMask(worldX, worldZ, this.settings.worldScale());
-               boolean fallbackOcean = isOceanFallback(landMaskSample, surface, coverClass, seaLevel);
-               boolean esaWaterFallback = coverClass == ESA_WATER;
-               boolean esaOceanFallback = esaWaterFallback && landMaskSample.known() && !landMaskSample.land() && surface <= seaLevel;
-               boolean cellHasWater = overtureWater || fallbackOcean || esaWaterFallback;
-               boolean cellOcean = overtureOcean || (!overtureWater && (fallbackOcean || esaOceanFallback));
+               boolean overtureWater = osmWaterEnabled && renderWater[index];
+               boolean overtureOcean = overtureWater && rasterizedOcean[index];
+               boolean sampledOceanCell = sampledOcean[index];
+               boolean belowSeaLevel = surface <= seaLevel;
+               boolean needsLandMask = shouldSampleLandMask(overtureWater, sampledOceanCell, belowSeaLevel);
+               TellusLandMaskSource.LandMaskSample landMaskSample = needsLandMask
+                  ? this.landMaskSource.sampleLandMask(worldX, worldZ, worldScale)
+                  : null;
+               boolean fallbackOcean = needsLandMask && isOceanFallback(landMaskSample, surface, coverClass, seaLevel);
+               boolean cellHasWater = overtureWater || fallbackOcean;
+               boolean cellOcean = overtureOcean || (!overtureWater && fallbackOcean);
                // Fast LODs should bias toward flooding sampled ocean cells that already sit below sea level.
                // Otherwise shallow shelves flash as exposed sand until full chunks replace the LOD.
-               if (!cellHasWater && sampledOcean && surface <= seaLevel) {
+               if (!cellHasWater && sampledOceanCell && belowSeaLevel) {
                   cellHasWater = true;
                   cellOcean = true;
                }
                int cellWaterSurface = surface;
-               if (!cellHasWater
-                  && this.settings.enableWater()
-                  && coverClass == ESA_WATER
-                  && hasAdjacentRenderedWater(rasterized.renderWater(), localX, localZ, lodSizePoints)) {
-                  cellHasWater = true;
-               }
-
                if (cellHasWater) {
                   cellWaterSurface = cellOcean ? seaLevel : Math.max(surface + 1, seaLevel);
                   if (coverClass == ESA_MANGROVES) {
@@ -182,9 +182,10 @@ public final class DhLodWaterResolver {
       int minBlockZ = baseZ + cellOffset - halfCell;
       int maxBlockX = baseX + (lodSizePoints - 1) * cellSize + cellOffset + halfCell - 1;
       int maxBlockZ = baseZ + (lodSizePoints - 1) * cellSize + cellOffset + halfCell - 1;
+      double worldScale = this.settings.worldScale();
       long queryStartNs = OsmPerf.now();
       TellusOsmWaterSource.WaterQueryResult result = this.osmWaterSource
-         .waterForAreaWithStatus(minBlockX, minBlockZ, maxBlockX, maxBlockZ, this.settings.worldScale(), 0, OsmQueryMode.BLOCKING);
+         .waterForAreaWithStatus(minBlockX, minBlockZ, maxBlockX, maxBlockZ, worldScale, 0, OsmQueryMode.BLOCKING);
       OsmPerf.recordWaterQuery(OsmPerf.elapsedSince(queryStartNs), result.features().size());
       List<OsmWaterFeature> features = result.features();
       if (features.isEmpty()) {
@@ -194,31 +195,42 @@ public final class DhLodWaterResolver {
          boolean[] oceanSample = new boolean[area];
          boolean[] lineSample = new boolean[area];
          int[] sampleOffsets = sampleOffsetsForCellSize(cellSize);
+         int maxSampleOffset = maxSampleOffset(sampleOffsets);
+         double blocksPerDegree = EarthProjection.blocksPerDegree(worldScale);
 
          for (OsmWaterFeature feature : features) {
             throwIfCancelled();
-            this.rasterizeFeature(feature, baseX, baseZ, lodSizePoints, cellSize, cellOffset, sampleOffsets, wetSampleMask, oceanSample, lineSample);
+            this.rasterizeFeature(
+               feature,
+               baseX,
+               baseZ,
+               lodSizePoints,
+               cellSize,
+               cellOffset,
+               sampleOffsets,
+               maxSampleOffset,
+               worldScale,
+               blocksPerDegree,
+               wetSampleMask,
+               oceanSample,
+               lineSample
+            );
          }
 
          int totalSamples = sampleOffsets.length / 2;
          boolean[] renderWater = new boolean[area];
          boolean[] ocean = new boolean[area];
-         boolean[] sampledWater = new boolean[area];
-         boolean[] sampledOcean = Arrays.copyOf(oceanSample, area);
-         boolean hasWater = false;
 
          for (int i = 0; i < area; i++) {
             int wetMask = wetSampleMask[i];
             if (wetMask != 0) {
-               sampledWater[i] = true;
                boolean render = shouldRenderExactWaterFootprint(Integer.bitCount(wetMask), totalSamples, oceanSample[i], lineSample[i]);
                renderWater[i] = render;
                ocean[i] = render && oceanSample[i];
-               hasWater |= render;
             }
          }
 
-         return new DhLodWaterResolver.RasterizedWaterArea(renderWater, ocean, sampledWater, sampledOcean, hasWater);
+         return new DhLodWaterResolver.RasterizedWaterArea(renderWater, ocean, oceanSample);
       }
    }
 
@@ -230,18 +242,20 @@ public final class DhLodWaterResolver {
       int cellSize,
       int cellOffset,
       int[] sampleOffsets,
+      int maxSampleOffset,
+      double worldScale,
+      double blocksPerDegree,
       int[] wetSampleMask,
       boolean[] oceanSample,
       boolean[] lineSample
    ) {
-      double blocksPerDegree = EarthProjection.blocksPerDegree(this.settings.worldScale());
       double minWorldX = feature.minLon() * blocksPerDegree;
       double maxWorldX = feature.maxLon() * blocksPerDegree;
-      double minLatWorldZ = EarthProjection.latToBlockZ(feature.minLat(), this.settings.worldScale());
-      double maxLatWorldZ = EarthProjection.latToBlockZ(feature.maxLat(), this.settings.worldScale());
+      double minLatWorldZ = EarthProjection.latToBlockZ(feature.minLat(), worldScale);
+      double maxLatWorldZ = EarthProjection.latToBlockZ(feature.maxLat(), worldScale);
       double minWorldZ = Math.min(minLatWorldZ, maxLatWorldZ);
       double maxWorldZ = Math.max(minLatWorldZ, maxLatWorldZ);
-      int searchRadius = Math.max(cellSize >> 1, maxSampleOffset(sampleOffsets));
+      int searchRadius = Math.max(cellSize >> 1, maxSampleOffset);
       int minCellX = cellIndexForWorld(minWorldX - searchRadius, baseX, cellOffset, cellSize, lodSizePoints);
       int maxCellX = cellIndexForWorld(maxWorldX + searchRadius, baseX, cellOffset, cellSize, lodSizePoints);
       int minCellZ = cellIndexForWorld(minWorldZ - searchRadius, baseZ, cellOffset, cellSize, lodSizePoints);
@@ -260,16 +274,15 @@ public final class DhLodWaterResolver {
             int index = row + localX;
             int mask = wetSampleMask[index];
 
-            for (int offsetIndex = 0; offsetIndex < sampleOffsets.length; offsetIndex += 2) {
-               int sampleIndex = offsetIndex / 2;
-               if ((mask & 1 << sampleIndex) != 0) {
+            for (int offsetIndex = 0, sampleBit = 1; offsetIndex < sampleOffsets.length; offsetIndex += 2, sampleBit <<= 1) {
+               if ((mask & sampleBit) != 0) {
                   continue;
                }
 
                int sampleX = worldX + sampleOffsets[offsetIndex];
                int sampleZ = worldZ + sampleOffsets[offsetIndex + 1];
-               if (feature.containsBlock(sampleX, sampleZ, this.settings.worldScale())) {
-                  mask |= 1 << sampleIndex;
+               if (feature.containsBlock(sampleX, sampleZ, worldScale)) {
+                  mask |= sampleBit;
                   if (feature.oceanHint()) {
                      oceanSample[index] = true;
                   }
@@ -394,14 +407,17 @@ public final class DhLodWaterResolver {
       }
    }
 
+   private static boolean shouldSampleLandMask(boolean overtureWater, boolean sampledOcean, boolean belowSeaLevel) {
+      return belowSeaLevel && !overtureWater && !sampledOcean;
+   }
+
    private static int[] sampleOffsetsForCellSize(int cellSize) {
       if (cellSize <= 1) {
          return SAMPLE_OFFSETS_SINGLE;
       } else if (cellSize == 2) {
-         return new int[]{-1, -1, 0, -1, -1, 0, 0, 0};
+         return SAMPLE_OFFSETS_CELL_2;
       } else if (cellSize <= 4) {
-         int quarter = Math.max(1, cellSize >> 2);
-         return new int[]{-quarter, -quarter, 0, -quarter, quarter, -quarter, -quarter, 0, 0, 0, quarter, 0, -quarter, quarter, 0, quarter, quarter, quarter};
+         return SAMPLE_OFFSETS_SMALL_GRID;
       } else {
          int edge = Math.max(1, (cellSize >> 1) - 1);
          int quarter = Math.max(1, edge >> 1);
@@ -421,20 +437,6 @@ public final class DhLodWaterResolver {
       }
 
       return offsets;
-   }
-
-   private static boolean hasAdjacentRenderedWater(boolean[] renderWater, int localX, int localZ, int lodSizePoints) {
-      for (int offsetIndex = 0; offsetIndex < NEIGHBOR_OFFSETS.length; offsetIndex += 2) {
-         int neighborX = localX + NEIGHBOR_OFFSETS[offsetIndex];
-         int neighborZ = localZ + NEIGHBOR_OFFSETS[offsetIndex + 1];
-         if (neighborX >= 0 && neighborZ >= 0 && neighborX < lodSizePoints && neighborZ < lodSizePoints) {
-            if (renderWater[neighborZ * lodSizePoints + neighborX]) {
-               return true;
-            }
-         }
-      }
-
-      return false;
    }
 
    private static boolean shouldRenderExactWaterFootprint(int wetSamples, int totalSamples, boolean ocean, boolean lineWater) {
@@ -493,11 +495,9 @@ public final class DhLodWaterResolver {
    private record AreaKey(int baseX, int baseZ, int lodSizePoints, int cellSize) {
    }
 
-   private record RasterizedWaterArea(boolean[] renderWater, boolean[] ocean, boolean[] sampledWater, boolean[] sampledOcean, boolean hasWater) {
+   private record RasterizedWaterArea(boolean[] renderWater, boolean[] ocean, boolean[] sampledOcean) {
       private static DhLodWaterResolver.RasterizedWaterArea dry(int area) {
-         return new DhLodWaterResolver.RasterizedWaterArea(
-            new boolean[area], new boolean[area], new boolean[area], new boolean[area], false
-         );
+         return new DhLodWaterResolver.RasterizedWaterArea(new boolean[area], new boolean[area], new boolean[area]);
       }
    }
 }

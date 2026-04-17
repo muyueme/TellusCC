@@ -33,6 +33,7 @@ import java.util.Objects;
 import java.util.Optional;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.ServerStarted;
@@ -120,7 +121,34 @@ public class Tellus implements ModInitializer {
                                  .requires(source -> source.hasPermission(2)))
                               .executes(context -> openGeoTpMap((CommandSourceStack)context.getSource()))
                         ))
-                     .then(Commands.literal("weather").executes(context -> showTellusWeather((CommandSourceStack)context.getSource()))))
+                     .then(
+                        (Commands.literal("weather")
+                              .executes(context -> showTellusWeather((CommandSourceStack)context.getSource())))
+                           .then(
+                              Commands.literal("enable_realtime_time")
+                                 .requires(source -> source.hasPermission(2))
+                                 .then(
+                                    Commands.argument("enabled", Objects.requireNonNull(BoolArgumentType.bool(), "enabledArgument"))
+                                       .executes(
+                                          context -> setRealtimeTimeOverride(
+                                             (CommandSourceStack)context.getSource(), BoolArgumentType.getBool(context, "enabled")
+                                          )
+                                       )
+                                 )
+                           )
+                           .then(
+                              Commands.literal("enable_realtime_weather")
+                                 .requires(source -> source.hasPermission(2))
+                                 .then(
+                                    Commands.argument("enabled", Objects.requireNonNull(BoolArgumentType.bool(), "enabledArgument"))
+                                       .executes(
+                                          context -> setRealtimeWeatherOverride(
+                                             (CommandSourceStack)context.getSource(), BoolArgumentType.getBool(context, "enabled")
+                                          )
+                                       )
+                                 )
+                           )
+                     ))
                   .then(
                      ((Commands.literal("config")
                               .requires(source -> source.hasPermission(2)))
@@ -214,6 +242,12 @@ public class Tellus implements ModInitializer {
             if (generator instanceof EarthChunkGenerator earthGenerator) {
                earthGenerator.processDeferredChunkDetailTick(level);
             }
+         }
+      });
+      ServerChunkEvents.CHUNK_UNLOAD.register((level, chunk) -> {
+         ChunkGenerator generator = level.getChunkSource().getGenerator();
+         if (generator instanceof EarthChunkGenerator earthGenerator) {
+            earthGenerator.discardPreparedChunkState(chunk.getPos());
          }
       });
       ServerPlayConnectionEvents.JOIN.register((Join)(handler, sender, server) -> REALTIME_MANAGER.onPlayerJoin(server, handler.getPlayer()));

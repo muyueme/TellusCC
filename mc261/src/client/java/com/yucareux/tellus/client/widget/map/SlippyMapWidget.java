@@ -167,6 +167,11 @@ public class SlippyMapWidget extends AbstractWidget {
       this.map.shutdown();
    }
 
+   public void cancelInteraction() {
+      this.mouseDown = false;
+      this.mouseDragged = false;
+   }
+
    private SlippyMapPoint getPointUnderMouse(double mouseX, double mouseY) {
       int scale = Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
       int mapX = (int)((mouseX - this.getX()) * scale) + this.map.getCameraX();

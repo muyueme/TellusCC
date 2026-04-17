@@ -78,16 +78,17 @@ final class NormalizedElevationCache implements TellusCacheHandle {
       int z1 = z0 + 1;
       double dx = sampleX - x0;
       double dz = sampleZ - z0;
-      double v00 = this.sampleHeight(key, x0, z0, builder);
-      double v10 = this.sampleHeight(key, x1, z0, builder);
-      double v01 = this.sampleHeight(key, x0, z1, builder);
-      double v11 = this.sampleHeight(key, x1, z1, builder);
+      NormalizedElevationTile baseTile = this.getOrBuildBlocking(key, builder);
+      double v00 = this.sampleHeight(key, baseTile, x0, z0, builder);
+      double v10 = this.sampleHeight(key, baseTile, x1, z0, builder);
+      double v01 = this.sampleHeight(key, baseTile, x0, z1, builder);
+      double v11 = this.sampleHeight(key, baseTile, x1, z1, builder);
       double lerpX0 = Mth.lerp(dx, v00, v10);
       double lerpX1 = Mth.lerp(dx, v01, v11);
       double elevation = Mth.lerp(dz, lerpX0, lerpX1);
       int nearestSampleX = Mth.floor(sampleX + 0.5);
       int nearestSampleZ = Mth.floor(sampleZ + 0.5);
-      TileSample provenanceSample = this.sampleProvenance(key, nearestSampleX, nearestSampleZ, builder);
+      TileSample provenanceSample = this.sampleProvenance(key, baseTile, nearestSampleX, nearestSampleZ, builder);
       return new NormalizedElevationTileSample(elevation, provenanceSample.primaryProvider(), provenanceSample.providerMask(), spacing);
    }
 
@@ -239,6 +240,20 @@ final class NormalizedElevationCache implements TellusCacheHandle {
       return tile.heights().get(localX, localZ);
    }
 
+   private double sampleHeight(
+      NormalizedElevationTileKey baseKey,
+      NormalizedElevationTile baseTile,
+      int globalSampleX,
+      int globalSampleZ,
+      NormalizedElevationCache.TileBuilder builder
+   ) {
+      if (isSampleInTile(baseKey, globalSampleX, globalSampleZ)) {
+         return baseTile.heights().get(localSampleCoordinate(baseKey.tileX(), globalSampleX), localSampleCoordinate(baseKey.tileZ(), globalSampleZ));
+      }
+
+      return this.sampleHeight(baseKey, globalSampleX, globalSampleZ, builder);
+   }
+
    private TileSample sampleProvenance(
       NormalizedElevationTileKey baseKey, int globalSampleX, int globalSampleZ, NormalizedElevationCache.TileBuilder builder
    ) {
@@ -251,6 +266,25 @@ final class NormalizedElevationCache implements TellusCacheHandle {
       DemUsage primaryProvider = provenance.primaryProvider(localX, localZ);
       int providerMask = provenance.isBlended(localX, localZ) ? provenance.providerMask() : primaryProvider.bit();
       return new TileSample(primaryProvider, providerMask);
+   }
+
+   private TileSample sampleProvenance(
+      NormalizedElevationTileKey baseKey,
+      NormalizedElevationTile baseTile,
+      int globalSampleX,
+      int globalSampleZ,
+      NormalizedElevationCache.TileBuilder builder
+   ) {
+      if (isSampleInTile(baseKey, globalSampleX, globalSampleZ)) {
+         int localX = localSampleCoordinate(baseKey.tileX(), globalSampleX);
+         int localZ = localSampleCoordinate(baseKey.tileZ(), globalSampleZ);
+         TellusElevationProvenance provenance = baseTile.provenance();
+         DemUsage primaryProvider = provenance.primaryProvider(localX, localZ);
+         int providerMask = provenance.isBlended(localX, localZ) ? provenance.providerMask() : primaryProvider.bit();
+         return new TileSample(primaryProvider, providerMask);
+      }
+
+      return this.sampleProvenance(baseKey, globalSampleX, globalSampleZ, builder);
    }
 
    private Path heightPath(NormalizedElevationTileKey key) {
@@ -299,6 +333,15 @@ final class NormalizedElevationCache implements TellusCacheHandle {
             return defaultValue;
          }
       }
+   }
+
+   private static boolean isSampleInTile(NormalizedElevationTileKey key, int globalSampleX, int globalSampleZ) {
+      return Math.floorDiv(globalSampleX, NormalizedElevationTileKey.TILE_SIZE) == key.tileX()
+         && Math.floorDiv(globalSampleZ, NormalizedElevationTileKey.TILE_SIZE) == key.tileZ();
+   }
+
+   private static int localSampleCoordinate(int tileCoordinate, int globalSampleCoordinate) {
+      return globalSampleCoordinate - tileCoordinate * NormalizedElevationTileKey.TILE_SIZE;
    }
 
    @FunctionalInterface

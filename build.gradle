@@ -11,19 +11,25 @@ subprojects {
 }
 
 tasks.named('clean') {
-	dependsOn(':mc1211:clean', ':mc261:clean')
+	dependsOn(':mc1201:clean', ':mc1211:clean', ':mc261:clean')
 }
 
 tasks.named('assemble') {
-	dependsOn(':mc1211:assemble', ':mc261:assemble')
+	dependsOn(':mc1201:assemble', ':mc1211:assemble', ':mc261:assemble')
 }
 
 tasks.named('check') {
-	dependsOn(':mc1211:check', ':mc261:check')
+	dependsOn(':mc1201:check', ':mc1211:check', ':mc261:check')
 }
 
 tasks.named('build') {
-	dependsOn(':mc1211:build', ':mc261:build')
+	dependsOn(':mc1201:build', ':mc1211:build', ':mc261:build')
+}
+
+tasks.register('build1201') {
+	group = 'build'
+	description = 'Builds the Minecraft 1.20.1 Fabric target.'
+	dependsOn(':mc1201:build')
 }
 
 tasks.register('build1211') {
@@ -44,10 +50,22 @@ tasks.register('runClient1211') {
 	dependsOn(':mc1211:runClient')
 }
 
+tasks.register('runClient1201') {
+	group = 'fabric'
+	description = 'Runs the Minecraft 1.20.1 client target.'
+	dependsOn(':mc1201:runClient')
+}
+
 tasks.register('runClient261') {
 	group = 'fabric'
 	description = 'Runs the Minecraft 26.1.1 client target.'
 	dependsOn(':mc261:runClient')
+}
+
+tasks.register('runServer1201') {
+	group = 'fabric'
+	description = 'Runs the Minecraft 1.20.1 server target.'
+	dependsOn(':mc1201:runServer')
 }
 
 tasks.register('runServer1211') {

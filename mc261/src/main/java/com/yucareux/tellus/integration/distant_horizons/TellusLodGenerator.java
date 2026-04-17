@@ -24,7 +24,6 @@ import com.yucareux.tellus.worldgen.EarthBiomeSource;
 import com.yucareux.tellus.worldgen.EarthChunkGenerator;
 import com.yucareux.tellus.worldgen.EarthGeneratorSettings;
 import com.yucareux.tellus.worldgen.EarthProjection;
-import com.yucareux.tellus.worldgen.MountainSurfaceRules;
 import com.yucareux.tellus.worldgen.WaterSurfaceResolver;
 import com.yucareux.tellus.worldgen.building.BuildingBlueprint;
 import com.yucareux.tellus.worldgen.building.BuildingProfile;
@@ -303,7 +302,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
          long phaseStart = beginTimingPhase(trace);
          if (useSharedTerrainCache) {
             sharedTerrainCache = this.generator.buildLodSharedTerrainCache(
-               worldXs[0], worldXs[lodSizePoints - 1], worldZs[0], worldZs[lodSizePoints - 1]
+               worldXs[0], worldXs[lodSizePoints - 1], worldZs[0], worldZs[lodSizePoints - 1], previewResolutionMeters
             );
          }
          endTimingPhase(trace, "sharedTerrainCache", phaseStart);
@@ -313,7 +312,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
             mountainTransitionCache = sharedTerrainCache.mountainTransitionCache();
          }
 
-         boolean reuseSharedExactCoverSamples = false;
+         boolean reuseSharedPreviewCoverSamples = sharedTerrainCache != null;
          phaseStart = beginTimingPhase(trace);
 
          for (int baseLocalZ = 0; baseLocalZ < lodSizePoints; baseLocalZ += coverStride) {
@@ -322,11 +321,11 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
             for (int baseLocalX = 0; baseLocalX < lodSizePoints; baseLocalX += coverStride) {
                int sampleWorldX = worldXs[baseLocalX];
                int sampleWorldZ = worldZs[baseLocalZ];
-               int coverClass = reuseSharedExactCoverSamples
+               int coverClass = reuseSharedPreviewCoverSamples
                   ? sharedTerrainCache.sampleCoverClass(sampleWorldX, sampleWorldZ)
                   : this.generator.sampleCoverClass(sampleWorldX, sampleWorldZ, previewResolutionMeters);
                int visualCoverClass = useVisualCover
-                  ? reuseSharedExactCoverSamples
+                  ? reuseSharedPreviewCoverSamples
                      ? sharedTerrainCache.sampleVisualCoverClass(sampleWorldX, sampleWorldZ)
                      : this.generator.sampleVisualCoverClass(sampleWorldX, sampleWorldZ, coverClass, previewResolutionMeters)
                   : coverClass;
@@ -422,14 +421,16 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
          endTimingPhase(trace, "terrainMetrics", phaseStart);
          if (shorelineCache == null) {
             phaseStart = beginTimingPhase(trace);
-            shorelineCache = this.generator.buildLodShorelineCache(worldXs[0], worldXs[lodSizePoints - 1], worldZs[0], worldZs[lodSizePoints - 1]);
+            shorelineCache = this.generator.buildLodShorelineCache(
+               worldXs[0], worldXs[lodSizePoints - 1], worldZs[0], worldZs[lodSizePoints - 1], previewResolutionMeters
+            );
             endTimingPhase(trace, "shorelineCache", phaseStart);
          }
          trace.note("shorelineCache", shorelineCache.mode());
          if (mountainTransitionCache == null) {
             phaseStart = beginTimingPhase(trace);
             mountainTransitionCache = this.generator.buildLodMountainTransitionCache(
-               worldXs[0], worldXs[lodSizePoints - 1], worldZs[0], worldZs[lodSizePoints - 1]
+               worldXs[0], worldXs[lodSizePoints - 1], worldZs[0], worldZs[lodSizePoints - 1], previewResolutionMeters
             );
             endTimingPhase(trace, "mountainTransitionCache", phaseStart);
          }
@@ -895,15 +896,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
       int maxY = minY + this.generator.getGenDepth();
       int absoluteTop = maxY - minY;
       TellusLodGenerator.WrapperCache wrappers = this.wrapperCache.get();
-      IDhApiBlockStateWrapper defaultFillerBlock = wrappers.getBlockState(Blocks.STONE.defaultBlockState());
-      IDhApiBlockStateWrapper defaultLandTopBlock = wrappers.getBlockState(Blocks.GRASS_BLOCK.defaultBlockState());
-      IDhApiBlockStateWrapper shrubTopBlock = wrappers.getBlockState(Blocks.COARSE_DIRT.defaultBlockState());
-      IDhApiBlockStateWrapper bareTopBlock = wrappers.getBlockState(Blocks.SAND.defaultBlockState());
       IDhApiBlockStateWrapper snowTopBlock = wrappers.getBlockState(Blocks.SNOW_BLOCK.defaultBlockState());
-      IDhApiBlockStateWrapper wetlandTopBlock = wrappers.getBlockState(Blocks.MUD.defaultBlockState());
-      IDhApiBlockStateWrapper builtTopBlock = wrappers.getBlockState(Blocks.STONE.defaultBlockState());
-      IDhApiBlockStateWrapper mossTopBlock = wrappers.getBlockState(Blocks.MOSS_BLOCK.defaultBlockState());
-      IDhApiBlockStateWrapper underwaterTopBlock = wrappers.getBlockState(Blocks.SAND.defaultBlockState());
       IDhApiBlockStateWrapper waterBlock = wrappers.getBlockState(Blocks.WATER.defaultBlockState());
       IDhApiBlockStateWrapper roadMainBlock = wrappers.getBlockState(Blocks.GRAY_CONCRETE.defaultBlockState());
       IDhApiBlockStateWrapper roadNormalBlock = wrappers.getBlockState(Blocks.CYAN_TERRACOTTA.defaultBlockState());
@@ -932,6 +925,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
       trace.addPhase("detailedWater", 0L);
       trace.addPhase("buildingMask", 0L);
       trace.addPhase("roadMask", 0L);
+      trace.addPhase("terrainMetrics", 0L);
       trace.addPhase("emit", 0L);
       trace.addPhase("emit.classify", 0L);
       trace.addPhase("emit.baseLayers", 0L);
@@ -956,6 +950,8 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
       boolean[] underwaterFlags = new boolean[area];
       int[] coverClasses = new int[area];
       int[] visualCoverClasses = new int[area];
+      int[] lodSlopeDiffs = new int[area];
+      int[] lodConvexities = new int[area];
       IDhApiBiomeWrapper[] biomeWrappers = new IDhApiBiomeWrapper[area];
       Holder<Biome>[] biomeHolders = newBiomeHolderArray(area);
       boolean[] remaSnowTerrainFlags = new boolean[area];
@@ -1033,6 +1029,17 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
          ? this.buildUltraFastRoadMask(worldXs, worldZs, lodSizePoints, cellSize, mainRoadsOnly, osmQueryMode)
          : new TellusLodGenerator.LodRoadMaskResult(null, null, null, null, null, null, null, null, false);
       endTimingPhase(trace, "roadMask", phaseStart);
+      phaseStart = beginTimingPhase(trace);
+      for (int localZ = 0; localZ < lodSizePoints; localZ++) {
+         int row = localZ * lodSizePoints;
+
+         for (int localX = 0; localX < lodSizePoints; localX++) {
+            int index = row + localX;
+            lodSlopeDiffs[index] = lodSlopeDiff(surfaceYs, lodSizePoints, localX, localZ, cellSize);
+            lodConvexities[index] = lodConvexity(surfaceYs, lodSizePoints, localX, localZ, cellSize);
+         }
+      }
+      endTimingPhase(trace, "terrainMetrics", phaseStart);
       byte[] roadClassMask = roadMaskResult.mask();
       boolean emitTimingEnabled = trace.isEnabled();
       long emitClassifyNanos = 0L;
@@ -1048,6 +1055,9 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
       int emitCanopyColumns = 0;
       int emitBuildingColumns = 0;
       int emitRoadColumns = 0;
+      BlockState lastTopState = null;
+      BlockState lastFillerState = null;
+      TellusLodGenerator.SurfaceWrapperPair lastSurfaceWrapper = null;
       phaseStart = beginTimingPhase(trace);
 
       for (int localZ = 0; localZ < lodSizePoints; localZ++) {
@@ -1079,37 +1089,33 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
             }
 
             long columnPhaseStart = emitTimingEnabled ? System.nanoTime() : 0L;
-            MountainSurfaceRules.ApproximateSurface mountainSurface = MountainSurfaceRules.classifyApproximateSurface(
+            EarthChunkGenerator.LodSurface lodSurface = this.generator.resolveUltraFastLodSurface(
+               biomeHolder,
+               worldX,
+               worldZ,
+               surfaceY,
+               underwater,
                coverClass,
                visualCoverClass,
-               surfaceY - this.generator.getSeaLevel(),
-               lodSlopeDiff(surfaceYs, lodSizePoints, localX, localZ, cellSize),
-               lodConvexity(surfaceYs, lodSizePoints, localX, localZ, cellSize),
+               lodSlopeDiffs[index],
+               lodConvexities[index],
                remaSnowTerrainFlags[index]
             );
-            IDhApiBlockStateWrapper fillerBlock = defaultFillerBlock;
-            IDhApiBlockStateWrapper topBlock;
-            if (mountainSurface.isMountain()) {
-               topBlock = wrappers.getBlockState(ultraFastMountainTopBlock(mountainSurface.palette()));
-               fillerBlock = wrappers.getBlockState(ultraFastMountainFillerBlock(mountainSurface.palette()));
+            BlockState topState = lodSurface.top();
+            BlockState fillerState = lodSurface.filler();
+            TellusLodGenerator.SurfaceWrapperPair surfaceWrapper;
+            if (topState == lastTopState && fillerState == lastFillerState && lastSurfaceWrapper != null) {
+               surfaceWrapper = lastSurfaceWrapper;
             } else {
-               topBlock = ultraFastTopBlockForCoverClass(
-                  mountainSurface,
-                  underwater,
-                  defaultLandTopBlock,
-                  shrubTopBlock,
-                  bareTopBlock,
-                  snowTopBlock,
-                  wetlandTopBlock,
-                  builtTopBlock,
-                  mossTopBlock,
-                  underwaterTopBlock
+               surfaceWrapper = new TellusLodGenerator.SurfaceWrapperPair(
+                  wrappers.getBlockState(topState), wrappers.getBlockState(fillerState)
                );
-               if (!underwater && this.generator.hasOvertureSandAt(worldX, worldZ)) {
-                  topBlock = bareTopBlock;
-                  fillerBlock = underwaterTopBlock;
-               }
+               lastTopState = topState;
+               lastFillerState = fillerState;
+               lastSurfaceWrapper = surfaceWrapper;
             }
+            IDhApiBlockStateWrapper fillerBlock = surfaceWrapper.filler();
+            IDhApiBlockStateWrapper topBlock = surfaceWrapper.top();
             int roadClassId = roadClassMask == null ? 0 : roadClassMask[index];
             boolean hasRoad = roadClassId > 0 && !hasBuilding;
             if (hasRoad) {
@@ -1256,26 +1262,6 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
       trace.stat("emit.roadColumns", emitRoadColumns);
    }
 
-   static BlockState ultraFastMountainTopBlock(MountainSurfaceRules.ApproximatePalette palette) {
-      return switch (palette) {
-         case DEEPSLATE, DEEPSLATE_TALUS -> Blocks.STONE.defaultBlockState();
-         case DEEPSLATE_SCREE -> Blocks.GRAVEL.defaultBlockState();
-         case WEATHERED_ANDESITE -> Blocks.ANDESITE.defaultBlockState();
-         case TUFF -> Blocks.TUFF.defaultBlockState();
-         default -> Blocks.STONE.defaultBlockState();
-      };
-   }
-
-   static BlockState ultraFastMountainFillerBlock(MountainSurfaceRules.ApproximatePalette palette) {
-      return switch (palette) {
-         case DEEPSLATE, DEEPSLATE_TALUS -> Blocks.DEEPSLATE.defaultBlockState();
-         case DEEPSLATE_SCREE -> Blocks.STONE.defaultBlockState();
-         case WEATHERED_ANDESITE -> Blocks.ANDESITE.defaultBlockState();
-         case TUFF -> Blocks.TUFF.defaultBlockState();
-         default -> Blocks.STONE.defaultBlockState();
-      };
-   }
-
    private boolean useUltraFastLodMode(int detailLevel) {
       EarthGeneratorSettings.DistantHorizonsRenderMode renderMode = this.generator.settings().distantHorizonsRenderMode();
       return renderMode == EarthGeneratorSettings.DistantHorizonsRenderMode.ULTRA_FAST
@@ -1285,37 +1271,6 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
    private boolean shouldSuppressCoarseShoreline(int detailLevel) {
       return this.generator.settings().distantHorizonsRenderMode() == EarthGeneratorSettings.DistantHorizonsRenderMode.FAST
          && detailLevel >= FAST_RENDER_SKIP_SHORELINE_MIN_DETAIL;
-   }
-
-   private static IDhApiBlockStateWrapper ultraFastTopBlockForCoverClass(
-      MountainSurfaceRules.ApproximateSurface mountainSurface,
-      boolean underwater,
-      IDhApiBlockStateWrapper defaultLandTopBlock,
-      IDhApiBlockStateWrapper shrubTopBlock,
-      IDhApiBlockStateWrapper bareTopBlock,
-      IDhApiBlockStateWrapper snowTopBlock,
-      IDhApiBlockStateWrapper wetlandTopBlock,
-      IDhApiBlockStateWrapper builtTopBlock,
-      IDhApiBlockStateWrapper mossTopBlock,
-      IDhApiBlockStateWrapper underwaterTopBlock
-   ) {
-      int coverClass = mountainSurface.surfaceCoverClass();
-      if (underwater) {
-         return coverClass != 95 && coverClass != 90 ? underwaterTopBlock : wetlandTopBlock;
-      } else if (mountainSurface.isSnow()) {
-         return snowTopBlock;
-      } else {
-         return switch (coverClass) {
-            case 10, 30, 40 -> defaultLandTopBlock;
-            case 20 -> shrubTopBlock;
-            case 50 -> builtTopBlock;
-            case 60 -> bareTopBlock;
-            case 70 -> snowTopBlock;
-            case 90, 95 -> wetlandTopBlock;
-            case 100 -> mossTopBlock;
-            default -> defaultLandTopBlock;
-         };
-      }
    }
 
    private static int toLayerTop(int inclusiveTopY, int minY, int absoluteTop) {

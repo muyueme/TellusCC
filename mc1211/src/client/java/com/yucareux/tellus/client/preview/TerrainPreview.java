@@ -61,9 +61,9 @@ import org.joml.Vector3f;
 
 @Environment(EnvType.CLIENT)
 public final class TerrainPreview implements AutoCloseable {
-   private static final int PREVIEW_GRID_SIZE = 385;
+   private static final int PREVIEW_GRID_SIZE = 257;
    private static final double PREVIEW_RADIUS_BLOCKS = 256.0;
-   private static final int PREVIEW_INFO_PROVIDER_GRID_SIZE = 33;
+   private static final int PREVIEW_INFO_PROVIDER_GRID_SIZE = 25;
    private static final int PREVIEW_OSM_MARGIN_BLOCKS = 32;
    private static final int PREVIEW_ELEVATION_PREFETCH_RADIUS = 1;
    private static final int PREVIEW_LAND_COVER_PREFETCH_RADIUS = 1;
@@ -80,7 +80,6 @@ public final class TerrainPreview implements AutoCloseable {
    private static final String ACTIVITY_BUILD_COLORS = "Coloring terrain";
    private static final String ACTIVITY_BUILD_TREES = "Applying vegetation markers";
    private static final String ACTIVITY_BUILD_HEIGHT_OFFSETS = "Applying feature heights";
-   private static final String ACTIVITY_BUILD_AXIS = "Finalizing preview mesh";
    private static final String ACTIVITY_BUILD_INFO = "Summarizing DEM coverage";
    private static final String ACTIVITY_OSM_WATER_FETCH = "Loading OSM water";
    private static final String ACTIVITY_OSM_WATER_RASTER = "Rasterizing OSM water";
@@ -91,6 +90,7 @@ public final class TerrainPreview implements AutoCloseable {
    private static final int ESA_NO_DATA = 0;
    private static final int ESA_WATER = 80;
    private static final double PREVIEW_INLAND_WATER_DEPTH_BLOCKS = 6.0;
+   private static final int PREVIEW_FLAT_WATER_COLOR = waterColorForDepth(PREVIEW_INLAND_WATER_DEPTH_BLOCKS);
    private static final int BUILDING_PREVIEW_COLOR = 10000536;
    private static final Vector3f LIGHT_DIR = new Vector3f(-0.4F, 0.8F, -0.4F).normalize();
    private final TellusElevationSource elevationSource = new TellusElevationSource();
@@ -107,7 +107,7 @@ public final class TerrainPreview implements AutoCloseable {
    );
    private final AtomicReference<TerrainPreview.PreviewInfo> info = new AtomicReference<>();
    private Future<TerrainPreview.PreviewMesh> pending;
-   private TerrainPreview.PreviewMesh mesh;
+   private volatile TerrainPreview.PreviewMesh mesh;
    private volatile TerrainPreview.PreviewBaseSnapshot baseSnapshot;
    private volatile EarthGeneratorSettings lastSettings;
 
@@ -324,6 +324,7 @@ public final class TerrainPreview implements AutoCloseable {
 
       int size = PREVIEW_GRID_SIZE;
       double[] blockHeights = new double[size * size];
+      boolean[] esaWaterMask = new boolean[size * size];
       double[] elevations = new double[size * size];
       int coverStride = 2;
       int coverSize = (size + coverStride - 1) / coverStride;
@@ -349,7 +350,8 @@ public final class TerrainPreview implements AutoCloseable {
       double minWorldZ = centerZ - radius;
       double maxWorldX = centerX + radius;
       double maxWorldZ = centerZ + radius;
-      this.queueBasePreviewPrefetch(centerX, centerZ, worldScale, settings.demSelection());
+      float[] xCoords = buildAxisCoordinates(size);
+      this.queueBasePreviewPrefetch(centerX, centerZ, worldScale, settings.demSelection(), previewResolutionMeters);
       this.queueOsmPreviewPrefetch(centerX, centerZ, worldScale, minWorldX, minWorldZ, maxWorldX, maxWorldZ, waterPreviewEnabled, roadsPreviewEnabled, buildingsPreviewEnabled);
 
       TerrainPreview.DownloadNetworkTracker downloadTracker = new TerrainPreview.DownloadNetworkTracker();
@@ -376,7 +378,11 @@ public final class TerrainPreview implements AutoCloseable {
 
                double blockX = centerX - radius + x * step;
                int idx = x + z * size;
-               boolean oceanZoom = this.useOceanZoom(blockX, blockZ, worldScale);
+               TellusLandMaskSource.LandMaskSample landMaskSample = this.landMaskSource.sampleLandMask(blockX, blockZ, worldScale);
+               int pointCoverClass = landMaskSample.known() && landMaskSample.land()
+                  ? ESA_NO_DATA
+                  : this.landCoverSource.sampleCoverClass(blockX, blockZ, worldScale, previewResolutionMeters);
+               boolean oceanZoom = useOceanZoom(landMaskSample, pointCoverClass);
                double elevation = this.elevationSource.samplePreviewElevationMeters(
                   blockX,
                   blockZ,
@@ -392,6 +398,7 @@ public final class TerrainPreview implements AutoCloseable {
                int surfaceY = scaledSurfaceY(elevation, settings);
                elevations[idx] = elevation;
                blockHeights[idx] = surfaceY;
+               esaWaterMask[idx] = pointCoverClass == ESA_WATER;
                minElevation = Math.min(minElevation, elevation);
                maxElevation = Math.max(maxElevation, elevation);
                minSurfaceY = Math.min(minSurfaceY, surfaceY);
@@ -420,7 +427,7 @@ public final class TerrainPreview implements AutoCloseable {
                int sampleX = Math.min(size - 1, xx * coverStride);
                double blockX = centerX - radius + sampleX * step;
                int idx = xx + z * coverSize;
-               int rawCoverClass = this.landCoverSource.sampleCoverClass(blockX, blockZ, worldScale);
+               int rawCoverClass = this.landCoverSource.sampleCoverClass(blockX, blockZ, worldScale, previewResolutionMeters);
                coverClasses[idx] = rawCoverClass;
                visualCoverClasses[idx] = rawCoverClass;
                if (this.shouldAbortRequest(id)) {
@@ -432,7 +439,7 @@ public final class TerrainPreview implements AutoCloseable {
                }
 
                if (useVisualCover) {
-                  visualCoverClasses[idx] = this.landCoverSource.sampleVisualCoverClass(blockX, blockZ, worldScale);
+                  visualCoverClasses[idx] = this.landCoverSource.sampleVisualCoverClass(blockX, blockZ, worldScale, previewResolutionMeters);
                   if (this.shouldAbortRequest(id)) {
                      return null;
                   }
@@ -489,12 +496,10 @@ public final class TerrainPreview implements AutoCloseable {
       long gridArea = (long)size * size;
       long treeOverlayUnits = gridArea;
       long heightOffsetUnits = gridArea;
-      long axisUnits = size;
       long infoUnits = (long)PREVIEW_INFO_PROVIDER_GRID_SIZE * PREVIEW_INFO_PROVIDER_GRID_SIZE;
       long buildTotal = gridArea * 3L
          + treeOverlayUnits
          + heightOffsetUnits
-         + axisUnits
          + infoUnits
          + (waterPreviewEnabled ? PREVIEW_WATER_OVERLAY_UNITS : 0L)
          + (roadsPreviewEnabled ? PREVIEW_ROAD_OVERLAY_UNITS : 0L)
@@ -570,7 +575,9 @@ public final class TerrainPreview implements AutoCloseable {
                convexity,
                slope,
                seaLevel,
+               esaWaterMask[idx],
                !waterPreviewEnabled,
+               settings.enableWater(),
                remaSnowEnabled && blockZ >= remaSnowBoundaryZ
             );
             terrainColors[idx] = color;
@@ -580,6 +587,9 @@ public final class TerrainPreview implements AutoCloseable {
          buildDone += size;
          this.updateBuildStatus(id, buildDone, buildTotal, ACTIVITY_BUILD_COLORS);
       }
+
+      TerrainPreview.PreviewInfo placeholderInfo = previewInfoPlaceholder(minElevation, maxElevation, minSurfaceY, maxSurfaceY);
+      this.publishInterimMesh(id, size, terrainHeights, terrainColors, detailHeights, detailColors, xCoords, placeholderInfo);
 
       if (!this.overlayTreePreviewMarkers(
          id,
@@ -637,20 +647,6 @@ public final class TerrainPreview implements AutoCloseable {
          return null;
       }
 
-      float[] xCoords = new float[size];
-
-      for (int ixx = 0; ixx < size; ixx++) {
-         if (this.shouldAbortRequest(id)) {
-            return null;
-         }
-
-         xCoords[ixx] = (float)(-1.0 + 2.0 * ixx / (size - 1));
-         if (((ixx + 1) & 63) == 0 || ixx + 1 == size) {
-            this.updateBuildStatus(id, buildDone + ixx + 1L, buildTotal, ACTIVITY_BUILD_AXIS);
-         }
-      }
-
-      buildDone += axisUnits;
       TerrainPreview.PreviewInfo previewInfo = this.buildPreviewInfo(
          id, settings, centerX, centerZ, minElevation, maxElevation, minSurfaceY, maxSurfaceY, buildTotal, buildDone
       );
@@ -681,6 +677,7 @@ public final class TerrainPreview implements AutoCloseable {
          maxWorldX,
          maxWorldZ,
          blockHeights,
+         esaWaterMask,
          elevations,
          coverClasses,
          visualCoverClasses,
@@ -764,7 +761,9 @@ public final class TerrainPreview implements AutoCloseable {
                convexity,
                slope,
                seaLevel,
+               snapshot.esaWaterMask()[idx],
                !waterPreviewEnabled,
+               settings.enableWater(),
                remaSnowEnabled && blockZ >= remaSnowBoundaryZ
             );
             terrainColors[idx] = color;
@@ -774,6 +773,8 @@ public final class TerrainPreview implements AutoCloseable {
          buildDone += size;
          this.updateBuildStatus(id, buildDone, buildTotal, ACTIVITY_BUILD_COLORS);
       }
+
+      this.publishInterimMesh(id, size, terrainHeights, terrainColors, detailHeights, detailColors, snapshot.xCoords(), snapshot.info());
 
       if (!this.overlayTreePreviewMarkers(
          id,
@@ -885,18 +886,24 @@ public final class TerrainPreview implements AutoCloseable {
    }
 
    private void queueBasePreviewPrefetch(
-      double centerX, double centerZ, double worldScale, EarthGeneratorSettings.DemSelection demSelection
+      double centerX,
+      double centerZ,
+      double worldScale,
+      EarthGeneratorSettings.DemSelection demSelection,
+      double previewResolutionMeters
    ) {
       if (worldScale > 0.0) {
          Util.backgroundExecutor().execute(() -> {
             try {
-               this.elevationSource.prefetchTiles(centerX, centerZ, worldScale, PREVIEW_ELEVATION_PREFETCH_RADIUS, demSelection);
+               this.elevationSource.prefetchTiles(
+                  centerX, centerZ, worldScale, PREVIEW_ELEVATION_PREFETCH_RADIUS, demSelection, previewResolutionMeters
+               );
             } catch (RuntimeException ignored) {
             }
          });
          Util.backgroundExecutor().execute(() -> {
             try {
-               this.landCoverSource.prefetchTiles(centerX, centerZ, worldScale, PREVIEW_LAND_COVER_PREFETCH_RADIUS);
+               this.landCoverSource.prefetchTiles(centerX, centerZ, worldScale, PREVIEW_LAND_COVER_PREFETCH_RADIUS, previewResolutionMeters);
             } catch (RuntimeException ignored) {
             }
          });
@@ -941,6 +948,47 @@ public final class TerrainPreview implements AutoCloseable {
       return base + settings.heightOffset();
    }
 
+   private void publishInterimMesh(
+      int id,
+      int size,
+      float[] terrainHeights,
+      int[] terrainColors,
+      float[] detailHeights,
+      int[] detailColors,
+      float[] xCoords,
+      TerrainPreview.PreviewInfo info
+   ) {
+      if (!this.shouldAbortRequest(id)) {
+         this.mesh = new TerrainPreview.PreviewMesh(
+            size,
+            1,
+            terrainHeights.clone(),
+            terrainColors.clone(),
+            detailHeights.clone(),
+            detailColors.clone(),
+            xCoords,
+            info
+         );
+         this.info.set(info);
+      }
+   }
+
+   private static float[] buildAxisCoordinates(int size) {
+      float[] xCoords = new float[size];
+
+      for (int i = 0; i < size; i++) {
+         xCoords[i] = (float)(-1.0 + 2.0 * i / (size - 1));
+      }
+
+      return xCoords;
+   }
+
+   private static TerrainPreview.PreviewInfo previewInfoPlaceholder(
+      double minElevation, double maxElevation, int minSurfaceY, int maxSurfaceY
+   ) {
+      return new TerrainPreview.PreviewInfo(List.of(), List.of(), 0, minElevation, maxElevation, minSurfaceY, maxSurfaceY);
+   }
+
    private TerrainPreview.PreviewInfo buildPreviewInfo(
       int id,
       EarthGeneratorSettings settings,
@@ -972,7 +1020,7 @@ public final class TerrainPreview implements AutoCloseable {
 
          for (int x = 0; x < providerGridSize; x++) {
             double blockX = centerX - radius + x * providerStep;
-            boolean oceanZoom = this.useOceanZoom(blockX, blockZ, settings.worldScale());
+            boolean oceanZoom = this.useOceanZoom(blockX, blockZ, settings.worldScale(), previewResolutionMeters);
             ElevationDiagnostic diagnostic = this.elevationSource.samplePreviewDiagnostic(
                blockX,
                blockZ,
@@ -1097,7 +1145,7 @@ public final class TerrainPreview implements AutoCloseable {
       double step
    ) {
       if (!(settings.worldScale() <= 0.0) && !(settings.worldScale() > 60.0) && !(step <= 0.0)) {
-         int size = 385;
+         int size = PREVIEW_GRID_SIZE;
          float density = treeMarkerDensity(settings.worldScale());
          if (!(density <= 0.0F)) {
             float treeHeight = treePreviewHeight(settings.worldScale());
@@ -1563,8 +1611,6 @@ public final class TerrainPreview implements AutoCloseable {
          progress.onProgress((float)processedFeatures / (float)totalFeatures * 0.82F);
       }
 
-      int seaLevel = settings.resolveSeaLevel();
-
       for (int z = 0; z < size; z++) {
          if (this.shouldAbortRequest(requestId)) {
             return false;
@@ -1576,10 +1622,7 @@ public final class TerrainPreview implements AutoCloseable {
             int idx = row + x;
             byte kind = waterKind[idx];
             if (kind != 0) {
-               double depth = kind == 2
-                  ? Math.max(0.0, seaLevel - blockHeights[idx])
-                  : Math.max(PREVIEW_INLAND_WATER_DEPTH_BLOCKS, seaLevel - blockHeights[idx]);
-               int color = waterColorForDepth(depth);
+               int color = PREVIEW_FLAT_WATER_COLOR;
                terrainColors[idx] = color;
                detailColors[idx] = color;
                detailHeightOffsets[idx] = 0.0F;
@@ -1633,7 +1676,7 @@ public final class TerrainPreview implements AutoCloseable {
          }
       }
 
-      int size = 385;
+      int size = PREVIEW_GRID_SIZE;
       int area = size * size;
       byte[] selectedClass = new byte[area];
       boolean[] blocked = new boolean[area];
@@ -2372,13 +2415,15 @@ public final class TerrainPreview implements AutoCloseable {
       int convexity,
       double slope,
       int seaLevel,
+      boolean esaWater,
       boolean fallbackWaterEnabled,
+      boolean flattenWaterColor,
       boolean remaSnowTerrain
    ) {
       int surfaceCoverClass = MountainSurfaceRules.resolveSurfaceCoverClass(terrainCoverClass, visualCoverClass);
-      double waterDepth = previewWaterDepthBlocks(surfaceCoverClass, terrainHeight, seaLevel, fallbackWaterEnabled);
+      double waterDepth = previewWaterDepthBlocks(surfaceCoverClass, esaWater, terrainHeight, seaLevel, fallbackWaterEnabled);
       if (waterDepth >= 0.0) {
-         return waterColorForDepth(waterDepth);
+         return flattenWaterColor ? PREVIEW_FLAT_WATER_COLOR : waterColorForDepth(waterDepth);
       } else {
          int heightAboveSea = (int)Math.round(terrainHeight) - seaLevel;
          MountainSurfaceRules.ApproximateSurface mountainSurface = MountainSurfaceRules.classifyApproximateSurface(
@@ -2409,12 +2454,12 @@ public final class TerrainPreview implements AutoCloseable {
    }
 
    // Keep preview shading lightweight; the full water resolver is too expensive to run per pixel.
-   private static double previewWaterDepthBlocks(int coverClass, double terrainHeight, int seaLevel, boolean enabled) {
+   private static double previewWaterDepthBlocks(int coverClass, boolean esaWater, double terrainHeight, int seaLevel, boolean enabled) {
       if (!enabled) {
          return -1.0;
       }
 
-      if (coverClass == ESA_WATER) {
+      if (esaWater || coverClass == ESA_WATER) {
          return Math.max(PREVIEW_INLAND_WATER_DEPTH_BLOCKS, seaLevel - terrainHeight);
       } else {
          return coverClass == ESA_NO_DATA && terrainHeight <= (double)seaLevel ? Math.max(0.0, seaLevel - terrainHeight) : -1.0;
@@ -2446,15 +2491,21 @@ public final class TerrainPreview implements AutoCloseable {
       }
    }
 
-   private boolean useOceanZoom(double blockX, double blockZ, double worldScale) {
+   private boolean useOceanZoom(double blockX, double blockZ, double worldScale, double previewResolutionMeters) {
       TellusLandMaskSource.LandMaskSample landSample = this.landMaskSource.sampleLandMask(blockX, blockZ, worldScale);
+      int coverClass = landSample.known() && landSample.land()
+         ? ESA_NO_DATA
+         : this.landCoverSource.sampleCoverClass(blockX, blockZ, worldScale, previewResolutionMeters);
+      return useOceanZoom(landSample, coverClass);
+   }
+
+   private static boolean useOceanZoom(TellusLandMaskSource.LandMaskSample landSample, int coverClass) {
       if (!landSample.known()) {
          return true;
       } else if (landSample.land()) {
          return false;
       } else {
-         int coverClass = this.landCoverSource.sampleCoverClass(blockX, blockZ, worldScale);
-         return coverClass == 0 || coverClass == 80;
+         return coverClass == ESA_NO_DATA || coverClass == ESA_WATER;
       }
    }
 
@@ -2726,6 +2777,7 @@ public final class TerrainPreview implements AutoCloseable {
       double maxWorldX,
       double maxWorldZ,
       double[] blockHeights,
+      boolean[] esaWaterMask,
       double[] elevations,
       int[] coverClasses,
       int[] visualCoverClasses,

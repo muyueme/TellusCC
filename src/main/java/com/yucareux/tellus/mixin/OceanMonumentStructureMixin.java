@@ -19,8 +19,8 @@ public class OceanMonumentStructureMixin {
    ) {
       PiecesContainer regeneratedPieces = cir.getReturnValue();
       if (!loadedPieces.isEmpty() && !regeneratedPieces.isEmpty()) {
-         StructurePiece loadedRoot = loadedPieces.pieces().getFirst();
-         StructurePiece regeneratedRoot = regeneratedPieces.pieces().getFirst();
+         StructurePiece loadedRoot = loadedPieces.pieces().get(0);
+         StructurePiece regeneratedRoot = regeneratedPieces.pieces().get(0);
          int offsetY = loadedRoot.getBoundingBox().minY() - regeneratedRoot.getBoundingBox().minY();
          if (offsetY != 0) {
             List<StructurePiece> movedPieces = new ArrayList<>(regeneratedPieces.pieces().size());

@@ -26,6 +26,8 @@ public final class OsmPerf {
    private static final LongAdder WATER_CHUNK_RESOLVE_CACHE_HITS = new LongAdder();
    private static final LongAdder WATER_CHUNK_RESOLVE_DEFERRED_FALLBACKS = new LongAdder();
    private static final LongAdder WATER_CHUNK_RESOLVE_BLOCKING_CALLS = new LongAdder();
+   private static final OsmPerf.TileSource[] TILE_SOURCES = OsmPerf.TileSource.values();
+   private static final OsmPerf.TileLoadPath[] TILE_LOAD_PATHS = OsmPerf.TileLoadPath.values();
    private static final LongAdder[] TILE_LOAD_COUNTS = createTileLoadCounters();
 
    private OsmPerf() {
@@ -129,9 +131,7 @@ public final class OsmPerf {
    }
 
    private static LongAdder[] createTileLoadCounters() {
-      OsmPerf.TileSource[] sources = OsmPerf.TileSource.values();
-      OsmPerf.TileLoadPath[] paths = OsmPerf.TileLoadPath.values();
-      LongAdder[] counters = new LongAdder[sources.length * paths.length];
+      LongAdder[] counters = new LongAdder[TILE_SOURCES.length * TILE_LOAD_PATHS.length];
 
       for (int i = 0; i < counters.length; i++) {
          counters[i] = new LongAdder();
@@ -141,7 +141,7 @@ public final class OsmPerf {
    }
 
    private static int counterIndex(OsmPerf.TileSource source, OsmPerf.TileLoadPath path) {
-      return source.ordinal() * OsmPerf.TileLoadPath.values().length + path.ordinal();
+      return source.ordinal() * TILE_LOAD_PATHS.length + path.ordinal();
    }
 
    private static void maybeLog() {
@@ -171,18 +171,19 @@ public final class OsmPerf {
       long waterChunkResolveBlockingCalls = WATER_CHUNK_RESOLVE_BLOCKING_CALLS.sumThenReset();
       StringBuilder tileLoads = new StringBuilder();
 
-      for (OsmPerf.TileSource source : OsmPerf.TileSource.values()) {
+      for (OsmPerf.TileSource source : TILE_SOURCES) {
          if (tileLoads.length() > 0) {
             tileLoads.append("; ");
          }
 
          tileLoads.append(source.logId()).append("[");
 
-         for (OsmPerf.TileLoadPath path : OsmPerf.TileLoadPath.values()) {
-            if (path != OsmPerf.TileLoadPath.MEMORY) {
+         for (int i = 0; i < TILE_LOAD_PATHS.length; i++) {
+            if (i > 0) {
                tileLoads.append(", ");
             }
 
+            OsmPerf.TileLoadPath path = TILE_LOAD_PATHS[i];
             long value = TILE_LOAD_COUNTS[counterIndex(source, path)].sumThenReset();
             tileLoads.append(path.logId()).append("=").append(value);
          }

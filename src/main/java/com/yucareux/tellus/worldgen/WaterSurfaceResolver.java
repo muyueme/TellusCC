@@ -416,15 +416,9 @@ public final class WaterSurfaceResolver {
       int[] waterSurface = new int[CHUNK_AREA];
       byte[] waterFlags = new byte[CHUNK_AREA];
       int coarseSurface = this.seaLevel - 1;
-
-      for (int dz = 0; dz < CHUNK_SIZE; dz++) {
-         for (int dx = 0; dx < CHUNK_SIZE; dx++) {
-            int index = chunkIndex(dx, dz);
-            terrainSurface[index] = coarseSurface;
-            waterSurface[index] = coarseSurface;
-            waterFlags[index] = WATER_NONE;
-         }
-      }
+      Arrays.fill(terrainSurface, coarseSurface);
+      Arrays.fill(waterSurface, coarseSurface);
+      Arrays.fill(waterFlags, WATER_NONE);
 
       return WaterSurfaceResolver.WaterChunkData.fromArrays(terrainSurface, waterSurface, waterFlags, true);
    }

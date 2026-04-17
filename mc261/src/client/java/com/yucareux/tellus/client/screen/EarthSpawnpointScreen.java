@@ -11,6 +11,7 @@ import net.fabricmc.api.Environment;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 @Environment(EnvType.CLIENT)
@@ -19,6 +20,7 @@ public class EarthSpawnpointScreen extends Screen {
    private SlippyMapWidget mapWidget;
    private MarkerMapComponent markerComponent;
    private PlaceSearchWidget searchWidget;
+   private boolean suppressMapRelease;
 
    public EarthSpawnpointScreen(EarthCustomizeScreen parent) {
       super(Component.translatable("gui.earth.spawnpoint"));
@@ -73,6 +75,32 @@ public class EarthSpawnpointScreen extends Screen {
       this.mapWidget.getMap().focus(latitude, longitude, 12);
    }
 
+   @Override
+   public boolean mouseClicked(MouseButtonEvent event, boolean isPrimary) {
+      if (this.isSearchOverlayMouseOver(event.x(), event.y())) {
+         this.suppressMapRelease = true;
+         this.cancelMapInteraction();
+         this.setFocused(this.searchWidget);
+         this.searchWidget.setFocused(true);
+         this.searchWidget.mouseClicked(event, isPrimary);
+         return true;
+      }
+
+      this.suppressMapRelease = false;
+      return super.mouseClicked(event, isPrimary);
+   }
+
+   @Override
+   public boolean mouseReleased(MouseButtonEvent event) {
+      if (this.suppressMapRelease || this.isSearchOverlayMouseOver(event.x(), event.y())) {
+         this.suppressMapRelease = false;
+         this.cancelMapInteraction();
+         return true;
+      }
+
+      return super.mouseReleased(event);
+   }
+
    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
       graphics.fill(0, 0, this.width, this.height, -1072689136);
    }
@@ -102,6 +130,16 @@ public class EarthSpawnpointScreen extends Screen {
 
       if (this.searchWidget != null) {
          this.searchWidget.close();
+      }
+   }
+
+   private boolean isSearchOverlayMouseOver(double mouseX, double mouseY) {
+      return this.searchWidget != null && this.searchWidget.isMouseOver(mouseX, mouseY);
+   }
+
+   private void cancelMapInteraction() {
+      if (this.mapWidget != null) {
+         this.mapWidget.cancelInteraction();
       }
    }
 }

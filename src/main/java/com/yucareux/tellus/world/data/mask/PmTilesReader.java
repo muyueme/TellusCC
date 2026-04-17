@@ -29,6 +29,7 @@ final class PmTilesReader {
    private PmTilesReader.PmTilesHeader header;
    
    private PmTilesReader.Directory rootDirectory;
+   private URI uri;
 
    PmTilesReader(String url) {
       this.url = Objects.requireNonNull(url, "url");
@@ -143,6 +144,8 @@ final class PmTilesReader {
    private PmTilesReader.Directory readDirectory(long offset, long length) throws IOException {
       if (length <= 0L) {
          return new PmTilesReader.Directory(List.of());
+      } else if (length > Integer.MAX_VALUE) {
+         throw new IOException("PMTiles directory too large");
       } else {
          byte[] compressed = this.readBytes(offset, (int)length);
          byte[] decompressed = gunzip(compressed);
@@ -184,7 +187,7 @@ final class PmTilesReader {
       if (length <= 0) {
          return new byte[0];
       } else {
-         HttpURLConnection connection = (HttpURLConnection)URI.create(this.url).toURL().openConnection();
+         HttpURLConnection connection = (HttpURLConnection)this.uri().toURL().openConnection();
          connection.setRequestProperty("Range", "bytes=" + offset + "-" + (offset + length - 1L));
          connection.setInstanceFollowRedirects(true);
          connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
@@ -209,6 +212,14 @@ final class PmTilesReader {
 
          return var7;
       }
+   }
+
+   private URI uri() {
+      if (this.uri == null) {
+         this.uri = URI.create(this.url);
+      }
+
+      return this.uri;
    }
 
    private static byte[] gunzip(byte[] input) throws IOException {
@@ -301,14 +312,21 @@ final class PmTilesReader {
          if (x >= 0 && y >= 0 && x <= max && y <= max) {
             long acc = ((1L << z * 2) - 1L) / 3L;
 
-            for (int a = z - 1; a >= 0; a--) {
-               int s = 1 << a;
-               int rx = s & x;
-               int ry = s & y;
-               acc += (long)(3 * rx ^ ry) << a;
-               int[] rotated = rotate(s, x, y, rx, ry);
-               x = rotated[0];
-               y = rotated[1];
+            for (int level = z - 1; level >= 0; level--) {
+               int scale = 1 << level;
+               int rx = scale & x;
+               int ry = scale & y;
+               acc += (long)(3 * rx ^ ry) << level;
+               if (ry == 0) {
+                  if (rx != 0) {
+                     x = scale - 1 - x;
+                     y = scale - 1 - y;
+                  }
+
+                  int swapped = x;
+                  x = y;
+                  y = swapped;
+               }
             }
 
             return acc;
@@ -318,41 +336,26 @@ final class PmTilesReader {
       }
    }
 
-   private static int[] rotate(int n, int x, int y, int rx, int ry) {
-      if (ry == 0) {
-         if (rx != 0) {
-            x = n - 1 - x;
-            y = n - 1 - y;
-         }
-
-         int t = x;
-         x = y;
-         y = t;
-      }
-
-      return new int[]{x, y};
-   }
-
    private static PmTilesReader.Entry findTile(List<PmTilesReader.Entry> entries, long tileId) {
-      int m = 0;
-      int n = entries.size() - 1;
+      int low = 0;
+      int high = entries.size() - 1;
 
-      while (m <= n) {
-         int k = n + m >> 1;
-         long diff = tileId - entries.get(k).tileId;
+      while (low <= high) {
+         int mid = low + high >>> 1;
+         long diff = tileId - entries.get(mid).tileId;
          if (diff > 0L) {
-            m = k + 1;
+            low = mid + 1;
          } else {
             if (diff >= 0L) {
-               return entries.get(k);
+               return entries.get(mid);
             }
 
-            n = k - 1;
+            high = mid - 1;
          }
       }
 
-      if (n >= 0) {
-         PmTilesReader.Entry entry = entries.get(n);
+      if (high >= 0) {
+         PmTilesReader.Entry entry = entries.get(high);
          if (entry.runLength == 0L) {
             return entry;
          }

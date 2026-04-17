@@ -352,9 +352,16 @@ final class PmTilesRangeReader {
                int rx = scale & x;
                int ry = scale & y;
                acc += (long)(3 * rx ^ ry) << level;
-               int[] rotated = rotate(scale, x, y, rx, ry);
-               x = rotated[0];
-               y = rotated[1];
+               if (ry == 0) {
+                  if (rx != 0) {
+                     x = scale - 1 - x;
+                     y = scale - 1 - y;
+                  }
+
+                  int swapped = x;
+                  x = y;
+                  y = swapped;
+               }
             }
 
             return acc;
@@ -364,22 +371,6 @@ final class PmTilesRangeReader {
       }
    }
 
-   private static int[] rotate(int n, int x, int y, int rx, int ry) {
-      if (ry == 0) {
-         if (rx != 0) {
-            x = n - 1 - x;
-            y = n - 1 - y;
-         }
-
-         int t = x;
-         x = y;
-         y = t;
-      }
-
-      return new int[]{x, y};
-   }
-
-   
    private static PmTilesRangeReader.Entry findTile(List<PmTilesRangeReader.Entry> entries, long tileId) {
       int low = 0;
       int high = entries.size() - 1;
