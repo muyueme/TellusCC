@@ -40,7 +40,7 @@ tasks.register('build1211') {
 
 tasks.register('build261') {
 	group = 'build'
-	description = 'Builds the Minecraft 26.1.1 Fabric target.'
+	description = 'Builds the Minecraft 26.1.2 Fabric target.'
 	dependsOn(':mc261:build')
 }
 
@@ -58,7 +58,7 @@ tasks.register('runClient1201') {
 
 tasks.register('runClient261') {
 	group = 'fabric'
-	description = 'Runs the Minecraft 26.1.1 client target.'
+	description = 'Runs the Minecraft 26.1.2 client target.'
 	dependsOn(':mc261:runClient')
 }
 
@@ -76,6 +76,6 @@ tasks.register('runServer1211') {
 
 tasks.register('runServer261') {
 	group = 'fabric'
-	description = 'Runs the Minecraft 26.1.1 server target.'
+	description = 'Runs the Minecraft 26.1.2 server target.'
 	dependsOn(':mc261:runServer')
 }

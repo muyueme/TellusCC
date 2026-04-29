@@ -14,8 +14,13 @@ import com.yucareux.tellus.worldgen.EarthGeneratorSettings;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
@@ -1135,8 +1140,7 @@ public class EarthCustomizeScreen extends Screen {
       entries.add(infoLine("Accessed on " + formatLocalDate() + " from"));
       entries.add(infoLink("https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer?f=pjson"));
       entries.add(infoLine("In-game processing: sampled from public USGS 3DEP dynamic GeoTIFF tiles"));
-      entries.add(infoLine("and cached locally. Automatic uses USGS across the U.S. and Mexico,"));
-      entries.add(infoLine("with Terrain Tiles retained only in known higher-resolution Mexico patches."));
+      entries.add(infoLine("and cached locally. Automatic uses USGS across the U.S."));
       entries.add(infoSubtle("USGS 3DEP products and services:"));
       entries.add(infoLink("https://www.usgs.gov/3d-elevation-program/about-3dep-products-services"));
       entries.add(infoSpacer());
@@ -1146,7 +1150,7 @@ public class EarthCustomizeScreen extends Screen {
       entries.add(infoLink("https://registry.opendata.aws/copernicus-dem/"));
       entries.add(infoLine("In-game processing: sampled from public Copernicus COG tiles"));
       entries.add(infoLine("with Terrain Tiles retained automatically where its footprint metadata"));
-      entries.add(infoLine("indicates higher native resolution outside the U.S. and Mexico."));
+      entries.add(infoLine("indicates higher native resolution outside regional DEM coverage."));
       entries.add(infoSpacer());
       entries.add(infoHeader("Open-Meteo (weather)"));
       entries.add(infoLine("Weather data provided by Open-Meteo.com."));
@@ -2240,18 +2244,53 @@ public class EarthCustomizeScreen extends Screen {
 
       private static void deleteDirectory(Path root) {
          if (Files.exists(root)) {
-            try (Stream<Path> stream = Files.walk(root)) {
-               stream.sorted((a, b) -> b.getNameCount() - a.getNameCount()).forEach(path -> {
-                  try {
-                     Files.deleteIfExists(path);
-                  } catch (IOException var2) {
-                     Tellus.LOGGER.warn("Failed to delete cache path {}", path, var2);
-                  }
-               });
-            } catch (IOException var6) {
-               Tellus.LOGGER.warn("Failed to delete cache folder {}", root, var6);
+            Path deleteRoot = moveAsideForDeletion(root);
+            if (deleteRoot != null) {
+               try {
+                  deleteTree(deleteRoot);
+               } catch (IOException var3) {
+                  Tellus.LOGGER.warn("Failed to delete cache folder {}", deleteRoot, var3);
+               }
             }
          }
+      }
+
+      private static Path moveAsideForDeletion(Path root) {
+         Path deleteRoot = root.resolveSibling(root.getFileName() + ".deleting-" + System.nanoTime());
+
+         try {
+            Files.move(root, deleteRoot, StandardCopyOption.ATOMIC_MOVE);
+            return deleteRoot;
+         } catch (AtomicMoveNotSupportedException var4) {
+            try {
+               Files.move(root, deleteRoot);
+               return deleteRoot;
+            } catch (IOException var3) {
+               Tellus.LOGGER.warn("Failed to prepare cache folder {} for deletion", root, var3);
+               return null;
+            }
+         } catch (IOException var5) {
+            Tellus.LOGGER.warn("Failed to prepare cache folder {} for deletion", root, var5);
+            return null;
+         }
+      }
+
+      private static void deleteTree(Path root) throws IOException {
+         Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+               Files.deleteIfExists(file);
+               return FileVisitResult.CONTINUE;
+            }
+
+            public FileVisitResult postVisitDirectory(Path dir, IOException error) throws IOException {
+               if (error != null) {
+                  throw error;
+               }
+
+               Files.deleteIfExists(dir);
+               return FileVisitResult.CONTINUE;
+            }
+         });
       }
    }
 

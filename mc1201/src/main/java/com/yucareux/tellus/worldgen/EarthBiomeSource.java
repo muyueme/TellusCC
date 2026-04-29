@@ -129,6 +129,14 @@ public final class EarthBiomeSource extends BiomeSource {
       return this.getBiomeAtBlock(blockX, blockZ, rawCoverClass, visualCoverClass, column, null);
    }
 
+   public Holder<Biome> getBiomeAtBlock(
+      int blockX, int blockZ, int rawCoverClass, int visualCoverClass, boolean hasWater, boolean isOcean
+   ) {
+      return this.fastSpawnMode
+         ? this.resolveFastSpawnSurfaceBiome(blockX, blockZ)
+         : this.resolveSurfaceBiomeAtBlock(blockX, blockZ, rawCoverClass, visualCoverClass, hasWater, isOcean, null);
+   }
+
    Holder<Biome> getBiomeAtBlock(
       int blockX, int blockZ, int rawCoverClass, int visualCoverClass, WaterSurfaceResolver.WaterColumnData column, String koppenCode
    ) {
@@ -193,44 +201,54 @@ public final class EarthBiomeSource extends BiomeSource {
    ) {
       if (rawCoverClass == ESA_MANGROVES) {
          return this.mangrove;
-      } else {
-         if (this.settings.enableWater()) {
-            WaterSurfaceResolver.WaterColumnData waterColumn = column != null
-               ? column
-               : this.waterResolver.resolveFastColumnData(blockX, blockZ, rawCoverClass);
-            if (waterColumn.hasWater()) {
-               return waterColumn.isOcean() ? this.ocean : this.river;
-            }
-         } else if (rawCoverClass == ESA_NO_DATA || rawCoverClass == ESA_WATER) {
-            WaterSurfaceResolver.WaterColumnData waterColumn = column != null ? column : this.waterResolver.resolveColumnData(blockX, blockZ, rawCoverClass);
-            if (waterColumn.hasWater()) {
-               if (waterColumn.isOcean()) {
-                  return this.ocean;
-               }
-
-               return this.river;
-            }
-         }
-
-         if (this.isRemaSnowTerrain(blockZ) || visualCoverClass == ESA_SNOW_ICE) {
-            return this.frozenPeaks;
-         }
-
-         String koppen = precomputedKoppen;
-         if (koppen == null) {
-            koppen = KOPPEN_SOURCE.sampleDitheredCode(blockX, blockZ, this.settings.worldScale());
-            if (koppen == null) {
-               koppen = KOPPEN_SOURCE.findNearestCode(blockX, blockZ, this.settings.worldScale());
-            }
-         }
-
-         ResourceKey<Biome> biomeKey = BiomeClassification.findBiomeKey(visualCoverClass, koppen);
-         if (biomeKey == null) {
-            biomeKey = BiomeClassification.findFallbackKey(visualCoverClass);
-         }
-
-         return biomeKey == null ? this.plains : this.resolveBiome(biomeKey, this.plains);
       }
+      if (this.settings.enableWater()) {
+         WaterSurfaceResolver.WaterColumnData waterColumn = column != null
+            ? column
+            : this.waterResolver.resolveFastColumnData(blockX, blockZ, rawCoverClass);
+         if (waterColumn.hasWater()) {
+            return waterColumn.isOcean() ? this.ocean : this.river;
+         }
+      } else if (rawCoverClass == ESA_NO_DATA || rawCoverClass == ESA_WATER) {
+         WaterSurfaceResolver.WaterColumnData waterColumn = column != null ? column : this.waterResolver.resolveColumnData(blockX, blockZ, rawCoverClass);
+         if (waterColumn.hasWater()) {
+            return waterColumn.isOcean() ? this.ocean : this.river;
+         }
+      }
+      return this.resolveSurfaceBiomeAfterWater(blockX, blockZ, visualCoverClass, precomputedKoppen);
+   }
+
+   private Holder<Biome> resolveSurfaceBiomeAtBlock(
+      int blockX, int blockZ, int rawCoverClass, int visualCoverClass, boolean hasWater, boolean isOcean, String precomputedKoppen
+   ) {
+      if (rawCoverClass == ESA_MANGROVES) {
+         return this.mangrove;
+      }
+      if ((this.settings.enableWater() || rawCoverClass == ESA_NO_DATA || rawCoverClass == ESA_WATER) && hasWater) {
+         return isOcean ? this.ocean : this.river;
+      }
+      return this.resolveSurfaceBiomeAfterWater(blockX, blockZ, visualCoverClass, precomputedKoppen);
+   }
+
+   private Holder<Biome> resolveSurfaceBiomeAfterWater(int blockX, int blockZ, int visualCoverClass, String precomputedKoppen) {
+      if (this.isRemaSnowTerrain(blockZ) || visualCoverClass == ESA_SNOW_ICE) {
+         return this.frozenPeaks;
+      }
+
+      String koppen = precomputedKoppen;
+      if (koppen == null) {
+         koppen = KOPPEN_SOURCE.sampleDitheredCode(blockX, blockZ, this.settings.worldScale());
+         if (koppen == null) {
+            koppen = KOPPEN_SOURCE.findNearestCode(blockX, blockZ, this.settings.worldScale());
+         }
+      }
+
+      ResourceKey<Biome> biomeKey = BiomeClassification.findBiomeKey(visualCoverClass, koppen);
+      if (biomeKey == null) {
+         biomeKey = BiomeClassification.findFallbackKey(visualCoverClass);
+      }
+
+      return biomeKey == null ? this.plains : this.resolveBiome(biomeKey, this.plains);
    }
 
    private boolean isRemaSnowTerrain(int blockZ) {

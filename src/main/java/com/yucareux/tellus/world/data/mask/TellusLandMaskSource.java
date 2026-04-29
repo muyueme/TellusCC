@@ -9,6 +9,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.imageio.ImageIO;
 import net.minecraft.util.Mth;
 
@@ -22,6 +23,7 @@ public final class TellusLandMaskSource {
    private static final String DEFAULT_BASE_URL = "https://github.com/Yucareux/Tellus-Land-Polygons/releases/download/v1.0.0/";
    private static final String PMTILES_NAME = "tellus_landmask.pmtiles";
    private static final int MAX_CACHE_TILES = intProperty("tellus.landmask.cacheTiles", 256);
+   private static final AtomicBoolean LOGGED_UNAVAILABLE = new AtomicBoolean(false);
    private final PmTilesReader reader;
    private final LoadingCache<TellusLandMaskSource.TileKey, TellusLandMaskSource.LandMaskTile> cache;
    private final int minZoom;
@@ -41,7 +43,7 @@ public final class TellusLandMaskSource {
          resolvedMax = header.maxZoom();
          ok = true;
       } catch (IOException var6) {
-         Tellus.LOGGER.warn("Land mask PMTiles unavailable, falling back to ESA only", var6);
+         logUnavailable(var6);
       }
 
       this.available = ok;
@@ -63,6 +65,10 @@ public final class TellusLandMaskSource {
 
    public TellusLandMaskSource.LandMaskSample sampleLandMaskLocalOnly(double blockX, double blockZ, double worldScale) {
       return this.sampleLandMask(blockX, blockZ, worldScale, true);
+   }
+
+   public TellusLandMaskSource.LandMaskSampler newSampler() {
+      return new TellusLandMaskSource.LandMaskSampler();
    }
 
    private TellusLandMaskSource.LandMaskSample sampleLandMask(double blockX, double blockZ, double worldScale, boolean localOnly) {
@@ -200,6 +206,19 @@ public final class TellusLandMaskSource {
       return baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
    }
 
+   private static void logUnavailable(IOException error) {
+      if (LOGGED_UNAVAILABLE.compareAndSet(false, true)) {
+         Tellus.LOGGER.info("Land mask PMTiles unavailable ({}); using ESA-only land fallback.", describeError(error));
+      }
+
+      Tellus.LOGGER.debug("Land mask PMTiles unavailable; using ESA-only land fallback", error);
+   }
+
+   private static String describeError(IOException error) {
+      String message = error.getMessage();
+      return message != null && !message.isBlank() ? message : error.getClass().getSimpleName();
+   }
+
    private static int intProperty(String key, int defaultValue) {
       String value = System.getProperty(key);
       if (value == null) {
@@ -210,6 +229,71 @@ public final class TellusLandMaskSource {
          } catch (NumberFormatException var4) {
             return defaultValue;
          }
+      }
+   }
+
+   public final class LandMaskSampler {
+      private double cachedWorldScale = Double.NaN;
+      private int cachedZoom;
+      private double cachedBlocksPerDegree;
+      private int cachedTileX = Integer.MIN_VALUE;
+      private int cachedTileY = Integer.MIN_VALUE;
+      private TellusLandMaskSource.LandMaskTile cachedTile;
+      private boolean cachedTileSet;
+
+      private LandMaskSampler() {
+      }
+
+      public TellusLandMaskSource.LandMaskSample sample(double blockX, double blockZ, double worldScale) {
+         if (!TellusLandMaskSource.this.available || worldScale <= 0.0) {
+            return TellusLandMaskSource.LandMaskSample.unknown();
+         }
+
+         if (worldScale != this.cachedWorldScale) {
+            this.cachedWorldScale = worldScale;
+            this.cachedZoom = TellusLandMaskSource.this.selectZoom(worldScale);
+            this.cachedBlocksPerDegree = EarthProjection.blocksPerDegree(worldScale);
+            this.cachedTileSet = false;
+         }
+
+         double lon = blockX / this.cachedBlocksPerDegree;
+         double lat = EarthProjection.blockZToLat(blockZ, worldScale);
+         if (lat < MIN_LAT || lat > MAX_LAT || lon < MIN_LON || lon > MAX_LON) {
+            return TellusLandMaskSource.LandMaskSample.unknown();
+         }
+
+         double latRad = Math.toRadians(lat);
+         double n = Math.pow(2.0, this.cachedZoom);
+         double x = (lon + MAX_LON) / (MAX_LON - MIN_LON) * n;
+         double y = (1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * n;
+         if (x < 0.0 || y < 0.0 || x >= n || y >= n) {
+            return TellusLandMaskSource.LandMaskSample.unknown();
+         }
+
+         int tileX = Mth.floor(x);
+         int tileY = Mth.floor(y);
+         TellusLandMaskSource.LandMaskTile tile;
+         if (this.cachedTileSet && tileX == this.cachedTileX && tileY == this.cachedTileY) {
+            tile = this.cachedTile;
+         } else {
+            tile = TellusLandMaskSource.this.getTile(new TellusLandMaskSource.TileKey(this.cachedZoom, tileX, tileY));
+            this.cachedTile = tile;
+            this.cachedTileX = tileX;
+            this.cachedTileY = tileY;
+            this.cachedTileSet = true;
+         }
+
+         if (tile == null) {
+            return TellusLandMaskSource.LandMaskSample.unknown();
+         } else if (tile.isEmpty()) {
+            return TellusLandMaskSource.LandMaskSample.known(false);
+         }
+
+         double localX = (x - tileX) * TILE_SIZE;
+         double localY = (y - tileY) * TILE_SIZE;
+         int px = Mth.clamp((int)localX, 0, tile.width() - 1);
+         int py = Mth.clamp((int)localY, 0, tile.height() - 1);
+         return TellusLandMaskSource.LandMaskSample.known(tile.isLand(px, py));
       }
    }
 

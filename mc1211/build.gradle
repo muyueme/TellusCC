@@ -6,7 +6,7 @@ plugins {
 def minecraftVersion = '1.21.1'
 def loaderVersion = '0.15.11'
 def fabricVersion = '0.115.4+1.21.1'
-def distantHorizonsApiVersion = '4.0.0'
+def distantHorizonsApiVersion = '6.1.0'
 def javaVersion = 21
 def distantHorizonsRuntimePath = providers.gradleProperty('mc1211_distant_horizons_runtime_path').orNull
 

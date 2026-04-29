@@ -13,7 +13,7 @@ import java.util.concurrent.CancellationException;
 import net.minecraft.util.Mth;
 
 public final class DhLodWaterResolver {
-   private static final int ESA_NO_DATA = 0;
+   private static final int ESA_WATER = 80;
    private static final int ESA_MANGROVES = 95;
    private static final int MAX_RASTER_CACHE = intProperty("tellus.dhWaterRasterCacheSize", 128, 16, 2048);
    private static final int[] SAMPLE_OFFSETS_SINGLE = new int[]{0, 0};
@@ -65,6 +65,7 @@ public final class DhLodWaterResolver {
          boolean[] rasterizedOcean = rasterized.ocean();
          boolean[] sampledOcean = rasterized.sampledOcean();
          int seaLevel = this.generator.getSeaLevel();
+         TellusLandMaskSource.LandMaskSampler landMaskSampler = this.landMaskSource.newSampler();
 
          for (int localZ = 0; localZ < lodSizePoints; localZ++) {
             throwIfCancelled();
@@ -78,15 +79,15 @@ public final class DhLodWaterResolver {
                int surface = terrainSurface[index];
                boolean overtureWater = osmWaterEnabled && renderWater[index];
                boolean overtureOcean = overtureWater && rasterizedOcean[index];
+               boolean esaWater = !osmWaterEnabled && coverClass == ESA_WATER;
                boolean sampledOceanCell = sampledOcean[index];
                boolean belowSeaLevel = surface <= seaLevel;
-               boolean needsLandMask = shouldSampleLandMask(overtureWater, sampledOceanCell, belowSeaLevel);
+               boolean needsLandMask = shouldSampleLandMask(overtureOcean, sampledOceanCell, belowSeaLevel);
                TellusLandMaskSource.LandMaskSample landMaskSample = needsLandMask
-                  ? this.landMaskSource.sampleLandMask(worldX, worldZ, worldScale)
+                  ? landMaskSampler.sample(worldX, worldZ, worldScale)
                   : null;
-               boolean fallbackOcean = needsLandMask && isOceanFallback(landMaskSample, surface, coverClass, seaLevel);
-               boolean cellHasWater = overtureWater || fallbackOcean;
-               boolean cellOcean = overtureOcean || (!overtureWater && fallbackOcean);
+               boolean cellOcean = OceanClassification.isOcean(overtureOcean, landMaskSample, surface, coverClass, seaLevel);
+               boolean cellHasWater = overtureWater || cellOcean || esaWater;
                // Fast LODs should bias toward flooding sampled ocean cells that already sit below sea level.
                // Otherwise shallow shelves flash as exposed sand until full chunks replace the LOD.
                if (!cellHasWater && sampledOceanCell && belowSeaLevel) {
@@ -305,27 +306,28 @@ public final class DhLodWaterResolver {
          int area = lodSizePoints * lodSizePoints;
          int[] distance = new int[area];
          int[] nearestWaterSurface = new int[area];
+         // Queue entries pack (z << 16) | x; index is recovered as z * lodSizePoints + x on dequeue.
+         // This avoids per-cell % and / (~25 cycles each) in the inner BFS loop.
          int[] queue = new int[area];
          Arrays.fill(distance, -1);
          int queueHead = 0;
          int queueTail = 0;
          boolean hasBoundary = false;
 
-         for (int index = 0; index < area; index++) {
-            if (waterMask[index]) {
-               int x = index % lodSizePoints;
-               int z = index / lodSizePoints;
-
-               for (int offsetIndex = 0; offsetIndex < NEIGHBOR_OFFSETS.length; offsetIndex += 2) {
-                  int nx = x + NEIGHBOR_OFFSETS[offsetIndex];
-                  int nz = z + NEIGHBOR_OFFSETS[offsetIndex + 1];
-                  if (nx >= 0 && nz >= 0 && nx < lodSizePoints && nz < lodSizePoints) {
-                     int neighbor = nz * lodSizePoints + nx;
-                     if (!waterMask[neighbor] && distance[neighbor] == -1) {
-                        distance[neighbor] = 1;
-                        nearestWaterSurface[neighbor] = waterSurface[index];
-                        queue[queueTail++] = neighbor;
-                        hasBoundary = true;
+         for (int z = 0, index = 0; z < lodSizePoints; z++) {
+            for (int x = 0; x < lodSizePoints; x++, index++) {
+               if (waterMask[index]) {
+                  for (int offsetIndex = 0; offsetIndex < NEIGHBOR_OFFSETS.length; offsetIndex += 2) {
+                     int nx = x + NEIGHBOR_OFFSETS[offsetIndex];
+                     int nz = z + NEIGHBOR_OFFSETS[offsetIndex + 1];
+                     if (nx >= 0 && nz >= 0 && nx < lodSizePoints && nz < lodSizePoints) {
+                        int neighbor = nz * lodSizePoints + nx;
+                        if (!waterMask[neighbor] && distance[neighbor] == -1) {
+                           distance[neighbor] = 1;
+                           nearestWaterSurface[neighbor] = waterSurface[index];
+                           queue[queueTail++] = (nz << 16) | nx;
+                           hasBoundary = true;
+                        }
                      }
                   }
                }
@@ -334,12 +336,12 @@ public final class DhLodWaterResolver {
 
          if (hasBoundary) {
             while (queueHead < queueTail) {
-               int index = queue[queueHead++];
+               int packed = queue[queueHead++];
+               int x = packed & 0xFFFF;
+               int z = packed >>> 16;
+               int index = z * lodSizePoints + x;
                int currentDistance = distance[index];
                if (currentDistance < blendCells) {
-                  int x = index % lodSizePoints;
-                  int z = index / lodSizePoints;
-
                   for (int offsetIndex = 0; offsetIndex < NEIGHBOR_OFFSETS.length; offsetIndex += 2) {
                      int nx = x + NEIGHBOR_OFFSETS[offsetIndex];
                      int nz = z + NEIGHBOR_OFFSETS[offsetIndex + 1];
@@ -348,7 +350,7 @@ public final class DhLodWaterResolver {
                         if (!waterMask[neighbor] && distance[neighbor] == -1) {
                            distance[neighbor] = currentDistance + 1;
                            nearestWaterSurface[neighbor] = nearestWaterSurface[index];
-                           queue[queueTail++] = neighbor;
+                           queue[queueTail++] = (nz << 16) | nx;
                         }
                      }
                   }
@@ -367,14 +369,6 @@ public final class DhLodWaterResolver {
                }
             }
          }
-      }
-   }
-
-   private static boolean isOceanFallback(TellusLandMaskSource.LandMaskSample landMaskSample, int surface, int coverClass, int seaLevel) {
-      if (landMaskSample.known()) {
-         return !landMaskSample.land() && surface <= seaLevel;
-      } else {
-         return coverClass == ESA_NO_DATA && surface <= seaLevel;
       }
    }
 
@@ -407,8 +401,8 @@ public final class DhLodWaterResolver {
       }
    }
 
-   private static boolean shouldSampleLandMask(boolean overtureWater, boolean sampledOcean, boolean belowSeaLevel) {
-      return belowSeaLevel && !overtureWater && !sampledOcean;
+   private static boolean shouldSampleLandMask(boolean overtureOcean, boolean sampledOcean, boolean belowSeaLevel) {
+      return belowSeaLevel && !overtureOcean && !sampledOcean;
    }
 
    private static int[] sampleOffsetsForCellSize(int cellSize) {

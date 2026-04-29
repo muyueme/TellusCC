@@ -193,16 +193,16 @@ final class PmTilesReader {
          connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
          connection.setReadTimeout(READ_TIMEOUT_MS);
          int code = connection.getResponseCode();
+         if (code != HttpURLConnection.HTTP_OK && code != HttpURLConnection.HTTP_PARTIAL) {
+            connection.disconnect();
+            throw new IOException("PMTiles HTTP error " + code);
+         }
 
          byte[] var7;
          try (InputStream input = connection.getInputStream()) {
-            if (code == 200) {
+            if (code == HttpURLConnection.HTTP_OK) {
                skipFully(input, offset);
                return readFully(input, length);
-            }
-
-            if (code != 206) {
-               throw new IOException("PMTiles HTTP error " + code);
             }
 
             var7 = readFully(input, length);

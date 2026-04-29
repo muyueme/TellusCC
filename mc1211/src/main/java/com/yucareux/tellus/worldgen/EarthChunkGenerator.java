@@ -146,6 +146,11 @@ public final class EarthChunkGenerator extends ChunkGenerator {
    private static final TellusOsmRoadSource OSM_ROAD_SOURCE = TellusWorldgenSources.osmRoads();
    private static final TellusOsmBuildingSource OSM_BUILDING_SOURCE = TellusWorldgenSources.osmBuildings();
    private static final TellusOsmSandSource OSM_SAND_SOURCE = TellusWorldgenSources.osmSand();
+   private static final double ESA_WORLD_COVER_RESOLUTION_METERS = 10.0;
+   private static final int ESA_NO_DATA = 0;
+   private static final int ESA_BUILT_UP = 50;
+   private static final int ESA_WATER = 80;
+   private static final int ESA_MANGROVES = 95;
    private static final int SPAGHETTI_WATER_GUARD_DEPTH = 4;
    private static final double OCEAN_CHUNK_CARVER_GUARD_RATIO = 0.7;
    private static final int OCEAN_CARVER_FLOOR_BUFFER = 3;
@@ -4183,6 +4188,22 @@ public final class EarthChunkGenerator extends ChunkGenerator {
       return neighborAverage - surface;
    }
 
+   public long sampleLodSnowSlopeShape(int worldX, int worldZ) {
+      int step = 4;
+      double scale = this.settings.worldScale();
+      int center = this.sampleSurfaceHeight(worldX, worldZ, scale);
+      int east = this.sampleSurfaceHeight(worldX + step, worldZ, scale);
+      int west = this.sampleSurfaceHeight(worldX - step, worldZ, scale);
+      int north = this.sampleSurfaceHeight(worldX, worldZ - step, scale);
+      int south = this.sampleSurfaceHeight(worldX, worldZ + step, scale);
+      int slopeDiff = Math.max(
+         Math.max(Math.abs(east - center), Math.abs(west - center)),
+         Math.max(Math.abs(north - center), Math.abs(south - center))
+      );
+      int convexity = (east + west + north + south) / 4 - center;
+      return (((long)slopeDiff) << 32) | ((long)convexity & 0xFFFFFFFFL);
+   }
+
    private EarthChunkGenerator.ColumnHeights resolveColumnHeights(
       int worldX,
       int worldZ,
@@ -6760,7 +6781,26 @@ public final class EarthChunkGenerator extends ChunkGenerator {
 
    public int sampleVisualCoverClass(int worldX, int worldZ, int rawCoverClass, double previewResolutionMeters) {
       double worldScale = this.settings.worldScale();
-      return worldScale > 0.0 && worldScale < 10.0 ? LAND_COVER_SOURCE.sampleVisualCoverClass(worldX, worldZ, worldScale, previewResolutionMeters) : rawCoverClass;
+      return shouldSampleVisualCover(worldScale, previewResolutionMeters, rawCoverClass)
+         ? LAND_COVER_SOURCE.sampleVisualCoverClass(worldX, worldZ, worldScale, previewResolutionMeters)
+         : rawCoverClass;
+   }
+
+   private static boolean shouldSampleVisualCover(double worldScale, double previewResolutionMeters, int rawCoverClass) {
+      return worldScale > 0.0
+         && worldScale < ESA_WORLD_COVER_RESOLUTION_METERS
+         && !isHardRawCoverClass(rawCoverClass)
+         && effectiveCoverResolutionMeters(worldScale, previewResolutionMeters) < ESA_WORLD_COVER_RESOLUTION_METERS;
+   }
+
+   private static double effectiveCoverResolutionMeters(double worldScale, double previewResolutionMeters) {
+      return Double.isFinite(previewResolutionMeters) && previewResolutionMeters > 0.0
+         ? Math.max(worldScale, previewResolutionMeters)
+         : worldScale;
+   }
+
+   private static boolean isHardRawCoverClass(int coverClass) {
+      return coverClass == ESA_NO_DATA || coverClass == ESA_WATER || coverClass == ESA_MANGROVES || coverClass == ESA_BUILT_UP;
    }
 
    public int resolveLodTerrainSurface(int worldX, int worldZ, int coverClass, double previewResolutionMeters) {

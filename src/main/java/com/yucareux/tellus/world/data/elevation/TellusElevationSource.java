@@ -29,12 +29,6 @@ import net.minecraft.util.Mth;
 
 public final class TellusElevationSource implements TellusCacheHandle {
    private static final double EQUATOR_CIRCUMFERENCE = 4.0075017E7;
-   private static final double[] USGS_PREFERRED_MEXICO_LONS = new double[]{
-      -117.2, -114.5, -111.1, -107.0, -103.5, -100.8, -97.8, -95.0, -92.0, -90.7, -91.1, -92.4, -94.9, -97.4, -100.6, -104.4, -108.9, -113.8, -117.2
-   };
-   private static final double[] USGS_PREFERRED_MEXICO_LATS = new double[]{
-      32.7, 31.5, 31.3, 31.9, 29.9, 27.8, 25.8, 24.3, 18.6, 19.3, 21.7, 16.2, 15.5, 17.2, 20.2, 23.0, 26.2, 29.4, 32.7
-   };
    private static final int TILE_SIZE = 256;
    private static final int MIN_ZOOM = 0;
    private static final int LAND_MAX_ZOOM = 15;
@@ -69,9 +63,6 @@ public final class TellusElevationSource implements TellusCacheHandle {
    private final Usgs3depElevationSource usgs = new Usgs3depElevationSource();
    private final CopernicusDemElevationSource copernicus = new CopernicusDemElevationSource();
    private final TerrainTilesResolutionIndex terrainResolutionIndex = TerrainTilesResolutionIndex.create();
-   private final TerrainTilesQualityMask terrainBetterThanUsgsMask = TerrainTilesQualityMask.create(
-      "/tellus/elevation/terrain_tiles_better_than_usgs_mask.bin.xz"
-   );
    private final TellusLandMaskSource landMask = TellusWorldgenSources.landMask();
    private volatile EarthGeneratorSettings.DemSelection lastLoggedSelection;
 
@@ -1619,11 +1610,9 @@ public final class TellusElevationSource implements TellusCacheHandle {
       if (latLon == null) {
          return TellusElevationSource.AutoDecision.DO_NOT_PREFER;
       } else {
-         boolean inMexico = isMexicoRegion(latLon.lat(), latLon.lon());
          boolean inUsgsRegion = isUsgsPreferredRegion(latLon.lat(), latLon.lon());
          boolean preferTerrainTiles = this.shouldPreferTerrainTilesOverCopernicus(latLon.lat(), latLon.lon());
-         boolean preferUsgs = inUsgsRegion
-            && (!inMexico || !this.terrainBetterThanUsgsMask.available() || !this.terrainBetterThanUsgsMask.hasGoodTerrainResolution(latLon.lat(), latLon.lon()));
+         boolean preferUsgs = inUsgsRegion;
          boolean preferCopernicus = !preferUsgs && !preferTerrainTiles;
 
          TellusLandMaskSource.LandMaskSample landMaskSample = this.landMask.sampleLandMask(blockX, blockZ, worldScale);
@@ -1638,11 +1627,9 @@ public final class TellusElevationSource implements TellusCacheHandle {
       if (latLon == null) {
          return TellusElevationSource.AutoDecision.DO_NOT_PREFER;
       } else {
-         boolean inMexico = isMexicoRegion(latLon.lat(), latLon.lon());
          boolean inUsgsRegion = isUsgsPreferredRegion(latLon.lat(), latLon.lon());
          boolean preferTerrainTiles = this.shouldPreferTerrainTilesOverCopernicus(latLon.lat(), latLon.lon());
-         boolean preferUsgs = inUsgsRegion
-            && (!inMexico || !this.terrainBetterThanUsgsMask.available() || !this.terrainBetterThanUsgsMask.hasGoodTerrainResolution(latLon.lat(), latLon.lon()));
+         boolean preferUsgs = inUsgsRegion;
          boolean preferCopernicus = !preferUsgs && !preferTerrainTiles;
 
          TellusLandMaskSource.LandMaskSample landMaskSample = this.landMask.sampleLandMaskLocalOnly(blockX, blockZ, worldScale);
@@ -1653,7 +1640,7 @@ public final class TellusElevationSource implements TellusCacheHandle {
    }
 
    private static boolean isUsgsPreferredRegion(double lat, double lon) {
-      return isContiguousUsRegion(lat, lon) || isAlaskaRegion(lat, lon) || isHawaiiRegion(lat, lon) || isPuertoRicoRegion(lat, lon) || isMexicoRegion(lat, lon);
+      return isContiguousUsRegion(lat, lon) || isAlaskaRegion(lat, lon) || isHawaiiRegion(lat, lon) || isPuertoRicoRegion(lat, lon);
    }
 
    private static boolean isContiguousUsRegion(double lat, double lon) {
@@ -1672,39 +1659,8 @@ public final class TellusElevationSource implements TellusCacheHandle {
       return lat >= 17.7 && lat <= 18.7 && lon >= -67.5 && lon <= -65.0;
    }
 
-   private static boolean isMexicoRegion(double lat, double lon) {
-      return pointInPolygon(lon, lat, USGS_PREFERRED_MEXICO_LONS, USGS_PREFERRED_MEXICO_LATS);
-   }
-
    private static boolean isPolarCoverage(double lat) {
       return lat >= POLAR_NORTH_MIN_LAT || lat <= POLAR_SOUTH_MAX_LAT;
-   }
-
-   private static boolean pointInPolygon(double lon, double lat, double[] polygonLons, double[] polygonLats) {
-      if (polygonLons.length != polygonLats.length || polygonLons.length < 3) {
-         return false;
-      } else {
-         boolean inside = false;
-         int previous = polygonLons.length - 1;
-
-         for (int current = 0; current < polygonLons.length; current++) {
-            double currentLon = polygonLons[current];
-            double currentLat = polygonLats[current];
-            double previousLon = polygonLons[previous];
-            double previousLat = polygonLats[previous];
-            boolean intersects = currentLat > lat != previousLat > lat;
-            if (intersects) {
-               double edgeLon = (previousLon - currentLon) * (lat - currentLat) / (previousLat - currentLat) + currentLon;
-               if (lon < edgeLon) {
-                  inside = !inside;
-               }
-            }
-
-            previous = current;
-         }
-
-         return inside;
-      }
    }
 
    private double sampleTerrariumMeters(double blockX, double blockZ, double worldScale, boolean highResOcean) {

@@ -58,7 +58,7 @@
   "property.tellus.ocean_shoreline_blend.name": "Mezcla de orillas oceánicas",
   "property.tellus.shoreline_blend_cliff_limit.name": "Limitar mezcla de orillas en acantilados",
   "property.tellus.world_scale.tooltip": "Cantidad de metros reales que representa un bloque en el juego",
-  "property.tellus.dem_provider.tooltip": "Selecciona la fuente de elevacion. Automático prioriza swissALTI3D en la cobertura de Suiza y Liechtenstein, prioriza AHN en los Países Bajos, prioriza CANElevation en Canadá, prioriza Noruega DTM1 en la Noruega continental, prioriza Japón GSI en Japón, usa ArcticDEM/REMA en las regiones polares, usa USGS 3DEP en Estados Unidos y México, usa Copernicus como base mundial para resoluciones de 30 m o peores y solo conserva Terrain Tiles cuando su resolución nativa es mejor que 30 m.",
+  "property.tellus.dem_provider.tooltip": "Selecciona la fuente de elevacion. Automático prioriza swissALTI3D en la cobertura de Suiza y Liechtenstein, prioriza AHN en los Países Bajos, prioriza CANElevation en Canadá, prioriza Noruega DTM1 en la Noruega continental, prioriza Japón GSI en Japón, usa ArcticDEM/REMA en las regiones polares, usa USGS 3DEP en Estados Unidos, usa Copernicus como base mundial para resoluciones de 30 m o peores y solo conserva Terrain Tiles cuando su resolución nativa es mejor que 30 m.",
   "property.tellus.dem_automatic.tooltip": "Cuando está activado, todas las fuentes DEM permanecen encendidas y Tellus usa el resolvedor automático completo de DEM.",
   "tellus.hma_access.button.tooltip": "Desactivado mientras se resuelven problemas del proveedor con el DEM HMA de 8 m.",
   "tellus.hma_access.token.hint": "Pega aquí el token bearer de Earthdata",

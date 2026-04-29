@@ -1,6 +1,7 @@
 package com.yucareux.tellus.mixin.client;
 
 import com.yucareux.tellus.client.LoadingTerrainScreenTiming;
+import com.yucareux.tellus.worldgen.EarthChunkGenerator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -12,7 +13,10 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.client.gui.screens.LevelLoadingScreen.Reason;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -26,7 +30,7 @@ public abstract class LevelLoadingScreenMixin {
    private static final int TEXT_PADDING = 20;
    private static final int LINE_SPACING = 2;
    private static final int MAX_TEXT_WIDTH = 420;
-   private static final int LOADING_WIDGET_HALF_HEIGHT = 100;
+   private static final int LOADING_WIDGET_HALF_HEIGHT = 42;
    private static final int LOADING_WIDGET_TEXT_GAP = 16;
    private static final List<Component> CONTRIBUTIONS = List.of(
       Component.literal("Land cover: © ESA WorldCover project / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium."),
@@ -52,7 +56,7 @@ public abstract class LevelLoadingScreenMixin {
       at = {@At("TAIL")}
    )
    private void tellus$renderContributions(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta, CallbackInfo ci) {
-      if (this.reason == Reason.OTHER) {
+      if (this.reason == Reason.OTHER && tellus$isLoadingTellusWorld()) {
          Font font = Minecraft.getInstance().font;
          int width = graphics.guiWidth();
          int height = graphics.guiHeight();
@@ -91,5 +95,15 @@ public abstract class LevelLoadingScreenMixin {
 
       int aboveLoadingWidgetY = centerY - LOADING_WIDGET_HALF_HEIGHT - LOADING_WIDGET_TEXT_GAP - totalHeight;
       return Math.max(TEXT_PADDING, Math.min(aboveLoadingWidgetY, bottomY));
+   }
+
+   private static boolean tellus$isLoadingTellusWorld() {
+      MinecraftServer server = Minecraft.getInstance().getSingleplayerServer();
+      if (server == null) {
+         return false;
+      }
+
+      ServerLevel overworld = server.getLevel(Level.OVERWORLD);
+      return overworld != null && overworld.getChunkSource().getGenerator() instanceof EarthChunkGenerator;
    }
 }

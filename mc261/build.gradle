@@ -3,10 +3,10 @@ plugins {
 	id 'maven-publish'
 }
 
-def minecraftVersion = '26.1.1'
+def minecraftVersion = '26.1.2'
 def loaderVersion = '0.19.1'
-def fabricVersion = '0.145.4+26.1.1'
-def distantHorizonsApiVersion = '5.1.0'
+def fabricVersion = '0.146.1+26.1.2'
+def distantHorizonsApiVersion = '6.1.0'
 def javaVersion = 25
 def distantHorizonsRuntimePath = providers.gradleProperty('mc261_distant_horizons_runtime_path').orNull
 

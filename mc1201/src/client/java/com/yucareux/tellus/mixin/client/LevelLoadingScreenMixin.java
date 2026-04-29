@@ -1,6 +1,7 @@
 package com.yucareux.tellus.mixin.client;
 
 import com.yucareux.tellus.client.LoadingTerrainScreenTiming;
+import com.yucareux.tellus.worldgen.EarthChunkGenerator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -11,7 +12,10 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -45,6 +49,10 @@ public abstract class LevelLoadingScreenMixin {
       at = {@At("TAIL")}
    )
    private void tellus$renderContributions(GuiGraphics graphics, int mouseX, int mouseY, float delta, CallbackInfo ci) {
+      if (!tellus$isLoadingTellusWorld()) {
+         return;
+      }
+
       Font font = Minecraft.getInstance().font;
       int width = Minecraft.getInstance().getWindow().getGuiScaledWidth();
       int height = Minecraft.getInstance().getWindow().getGuiScaledHeight();
@@ -82,5 +90,15 @@ public abstract class LevelLoadingScreenMixin {
 
       int aboveLoadingWidgetY = centerY - LOADING_WIDGET_HALF_HEIGHT - LOADING_WIDGET_TEXT_GAP - totalHeight;
       return Math.max(TEXT_PADDING, Math.min(aboveLoadingWidgetY, bottomY));
+   }
+
+   private static boolean tellus$isLoadingTellusWorld() {
+      MinecraftServer server = Minecraft.getInstance().getSingleplayerServer();
+      if (server == null) {
+         return false;
+      }
+
+      ServerLevel overworld = server.getLevel(Level.OVERWORLD);
+      return overworld != null && overworld.getChunkSource().getGenerator() instanceof EarthChunkGenerator;
    }
 }

@@ -144,6 +144,12 @@ public final class WaterSurfaceResolver {
          return new WaterSurfaceResolver.WaterChunkData(chunkX, chunkZ, cached);
       } else if (!this.useLegacyBlockingWaterFallback()) {
          this.prefetchRegionsForChunk(chunkX, chunkZ, 1);
+         WaterSurfaceResolver.WaterRegionData prefetched = this.getRegionIfPresent(regionX, regionZ);
+         if (prefetched != null) {
+            OsmPerf.recordWaterChunkResolve(OsmPerf.elapsedSince(resolveStartNs), false, false, true);
+            return new WaterSurfaceResolver.WaterChunkData(chunkX, chunkZ, prefetched);
+         }
+
          WaterSurfaceResolver.WaterChunkData fallback = dryTerrainSurfaces != null
             ? WaterSurfaceResolver.WaterChunkData.dryFromTerrain(dryTerrainSurfaces)
             : this.buildDryChunkData();
@@ -270,7 +276,7 @@ public final class WaterSurfaceResolver {
             if (!sample.hasWater()) {
                return new WaterSurfaceResolver.WaterColumnData(false, false, surface, surface);
             } else {
-               boolean isOcean = this.isFastOsmOcean(sample.ocean(), landMaskSample, surface, coverClass);
+               boolean isOcean = OceanClassification.isOcean(sample.ocean(), landMaskSample, surface, coverClass, this.seaLevel);
                int waterSurface = isOcean ? this.seaLevel : Math.max(surface + 1, this.seaLevel);
                int terrainSurface = surface;
                if (isOcean) {
@@ -434,7 +440,7 @@ public final class WaterSurfaceResolver {
    private WaterSurfaceResolver.WaterColumnData coarseWaterColumnData(int blockX, int blockZ, int coverClass, double previewResolutionMeters) {
       TellusLandMaskSource.LandMaskSample landMaskSample = this.landMaskSource.sampleLandMask(blockX, blockZ, this.settings.worldScale());
       int surface = this.sampleSurfaceHeight(blockX, blockZ, coverClass, landMaskSample, previewResolutionMeters);
-      boolean isOcean = this.isFastOsmOcean(false, landMaskSample, surface, coverClass);
+      boolean isOcean = OceanClassification.isOcean(false, landMaskSample, surface, coverClass, this.seaLevel);
       if (!shouldEmitCoarseFallbackWater(this.osmWaterEnabled, coverClass, isOcean)) {
          return new WaterSurfaceResolver.WaterColumnData(false, false, surface, surface);
       } else {
@@ -1220,16 +1226,6 @@ public final class WaterSurfaceResolver {
             noDataMask[index] = true;
             oceanHintMask[index] = true;
          }
-      }
-   }
-
-   private boolean isFastOsmOcean(boolean oceanHint, TellusLandMaskSource.LandMaskSample landMaskSample, int surface, int coverClass) {
-      if (oceanHint) {
-         return true;
-      } else if (landMaskSample.known()) {
-         return !landMaskSample.land() && surface <= this.seaLevel;
-      } else {
-         return coverClass == ESA_NO_DATA && surface <= this.seaLevel;
       }
    }
 

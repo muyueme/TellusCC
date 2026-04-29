@@ -7,7 +7,7 @@ plugins {
 def minecraftVersion = '1.20.1'
 def loaderVersion = '0.16.10'
 def fabricVersion = '0.92.8+1.20.1'
-def distantHorizonsApiVersion = '4.0.0'
+def distantHorizonsApiVersion = '6.1.0'
 def javaVersion = 17
 def distantHorizonsRuntimePath = providers.gradleProperty('mc1201_distant_horizons_runtime_path').orNull
 def overriddenSharedMainSources = [
@@ -58,7 +58,7 @@ eclipse {
 			}
 			whenMerged { classpath ->
 				classpath.entries
-					.findAll { it.kind == 'src' && it.path == 'main-java' }
+					.findAll { it.kind == 'src' && (it.path == 'main-java' || it.path == 'src_main_java') }
 					.each { it.excludes = (it.excludes + overriddenSharedMainSources).unique() }
 			}
 		}

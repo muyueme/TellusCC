@@ -71,6 +71,12 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
    private static final int PREFETCH_DEDUP_MAX = 4096;
    private static final int FAST_RENDER_ULTRA_FAST_MIN_DETAIL = intProperty("tellus.dhFastRenderUltraFastMinDetail", 4, 0, 24);
    private static final int FAST_RENDER_SKIP_SHORELINE_MIN_DETAIL = intProperty("tellus.dhFastRenderSkipShorelineMinDetail", 3, 0, 24);
+   private static final double ESA_WORLD_COVER_RESOLUTION_METERS = 10.0;
+   private static final int ESA_NO_DATA = 0;
+   private static final int ESA_BUILT_UP = 50;
+   private static final int ESA_SNOW_ICE = 70;
+   private static final int ESA_WATER = 80;
+   private static final int ESA_MANGROVES = 95;
    private static final double ROAD_LIGHT_BASE_SPACING_METERS = 40.0;
    private static final int ROAD_LIGHT_BLOCK_LIGHT = 15;
    private static final TellusLodGenerator.CanopyProfile TREE_COVER_FALLBACK_CANOPY_PROFILE = new TellusLodGenerator.CanopyProfile(
@@ -292,7 +298,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
          BlockState lastTopState = null;
          BlockState lastFillerState = null;
          TellusLodGenerator.SurfaceWrapperPair lastSurfaceWrapper = null;
-         boolean useVisualCover = settings.worldScale() > 0.0 && settings.worldScale() < 10.0;
+         boolean sampleVisualCover = shouldSampleVisualCover(settings, previewResolutionMeters);
          boolean useSharedTerrainCache = detailLevel == 2;
          EarthChunkGenerator.LodSharedTerrainCache sharedTerrainCache = null;
          EarthChunkGenerator.LodShorelineCache shorelineCache = null;
@@ -324,7 +330,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
                int coverClass = reuseSharedPreviewCoverSamples
                   ? sharedTerrainCache.sampleCoverClass(sampleWorldX, sampleWorldZ)
                   : this.generator.sampleCoverClass(sampleWorldX, sampleWorldZ, previewResolutionMeters);
-               int visualCoverClass = useVisualCover
+               int visualCoverClass = sampleVisualCover && !isHardRawCoverClass(coverClass)
                   ? reuseSharedPreviewCoverSamples
                      ? sharedTerrainCache.sampleVisualCoverClass(sampleWorldX, sampleWorldZ)
                      : this.generator.sampleVisualCoverClass(sampleWorldX, sampleWorldZ, coverClass, previewResolutionMeters)
@@ -383,14 +389,11 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
                boolean hasWater = resolvedHasWater[index];
                boolean isOcean = resolvedOcean[index];
                int vegetationSurface = isOcean ? Mth.clamp(baseTerrainSurface[index], minY, maxY - 1) : surfaceY;
-               WaterSurfaceResolver.WaterColumnData column = hasWater
-                  ? new WaterSurfaceResolver.WaterColumnData(true, isOcean, surfaceY, waterSurface)
-                  : new WaterSurfaceResolver.WaterColumnData(false, false, surfaceY, surfaceY);
                surfaceYs[index] = surfaceY;
                vegetationSurfaceYs[index] = Mth.clamp(vegetationSurface, minY, maxY - 1);
                waterSurfaces[index] = waterSurface;
                underwaterFlags[index] = hasWater && waterSurface > surfaceY;
-               Holder<Biome> biomeHolder = this.biomeSource.getBiomeAtBlock(worldX, worldZ, coverClasses[index], visualCoverClasses[index], column);
+               Holder<Biome> biomeHolder = this.biomeSource.getBiomeAtBlock(worldX, worldZ, coverClasses[index], visualCoverClasses[index], hasWater, isOcean);
                biomeHolders[index] = biomeHolder;
                biomeWrappers[index] = wrappers.getBiome(biomeHolder);
             }
@@ -419,6 +422,22 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
             }
          }
          endTimingPhase(trace, "terrainMetrics", phaseStart);
+         if (cellSize > 4) {
+            phaseStart = beginTimingPhase(trace);
+            for (int localZ = 0; localZ < lodSizePoints; localZ++) {
+               int worldZ = worldZs[localZ];
+               int row = localZ * lodSizePoints;
+               for (int localX = 0; localX < lodSizePoints; localX++) {
+                  int index = row + localX;
+                  if (coverClasses[index] == ESA_SNOW_ICE || visualCoverClasses[index] == ESA_SNOW_ICE) {
+                     long packed = this.generator.sampleLodSnowSlopeShape(worldXs[localX], worldZ);
+                     lodSlopeDiffs[index] = (int)(packed >> 32);
+                     lodConvexities[index] = (int)packed;
+                  }
+               }
+            }
+            endTimingPhase(trace, "snowSlopeRefine", phaseStart);
+         }
          if (shorelineCache == null) {
             phaseStart = beginTimingPhase(trace);
             shorelineCache = this.generator.buildLodShorelineCache(
@@ -490,7 +509,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
                   IDhApiBiomeWrapper biome = biomeWrappers[index];
                   TellusLodGenerator.CanopyProfile biomeCanopyProfile = canopyProfile(biomeHolder);
                   TellusLodGenerator.CanopyProfile canopyProfile = resolveTreeCoverCanopyProfile(biomeCanopyProfile, coverClass);
-                  boolean isMangrove = canopyProfile.isMangrove() || coverClass == 95;
+                  boolean isMangrove = canopyProfile.isMangrove() || coverClass == ESA_MANGROVES;
                   TellusLodGenerator.LodBuildingColumn buildingColumn = buildingColumns == null ? null : buildingColumns[index];
                   boolean hasBuilding = buildingColumn != null;
                   int originalSurfaceY = surfaceY;
@@ -932,7 +951,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
       trace.addPhase("emit.canopy", 0L);
       trace.addPhase("emit.features", 0L);
       trace.addPhase("emit.output", 0L);
-      boolean useVisualCover = settings.worldScale() > 0.0 && settings.worldScale() < 10.0;
+      boolean sampleVisualCover = shouldSampleVisualCover(settings, previewResolutionMeters);
       boolean remaSnowEnabled = TellusElevationSource.usesPolarDem(settings.demSelection()) && settings.worldScale() > 0.0;
       double remaSnowBoundaryZ = remaSnowEnabled ? TellusElevationSource.remaBoundaryBlockZ(settings.worldScale()) : Double.POSITIVE_INFINITY;
       int area = lodSizePoints * lodSizePoints;
@@ -966,7 +985,9 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
             int index = localZ * lodSizePoints + localX;
             int worldX = worldXs[localX];
             int coverClass = this.generator.sampleCoverClass(worldX, worldZ, previewResolutionMeters);
-            int visualCoverClass = useVisualCover ? this.generator.sampleVisualCoverClass(worldX, worldZ, coverClass, previewResolutionMeters) : coverClass;
+            int visualCoverClass = sampleVisualCover && !isHardRawCoverClass(coverClass)
+               ? this.generator.sampleVisualCoverClass(worldX, worldZ, coverClass, previewResolutionMeters)
+               : coverClass;
             baseTerrainSurface[index] = this.generator.resolveLodTerrainSurface(worldX, worldZ, coverClass, previewResolutionMeters);
             coverClasses[index] = coverClass;
             visualCoverClasses[index] = visualCoverClass;
@@ -1005,13 +1026,10 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
             int waterSurface = Mth.clamp(resolvedWaterSurface[index], minY, maxY - 1);
             boolean hasWater = resolvedHasWater[index];
             boolean isOcean = resolvedOcean[index];
-            WaterSurfaceResolver.WaterColumnData column = hasWater
-               ? new WaterSurfaceResolver.WaterColumnData(true, isOcean, surfaceY, waterSurface)
-               : new WaterSurfaceResolver.WaterColumnData(false, false, surfaceY, surfaceY);
             surfaceYs[index] = surfaceY;
             waterSurfaces[index] = waterSurface;
             underwaterFlags[index] = hasWater && waterSurface > surfaceY;
-            Holder<Biome> biomeHolder = this.biomeSource.getBiomeAtBlock(worldX, worldZ, coverClasses[index], visualCoverClasses[index], column);
+            Holder<Biome> biomeHolder = this.biomeSource.getBiomeAtBlock(worldX, worldZ, coverClasses[index], visualCoverClasses[index], hasWater, isOcean);
             biomeHolders[index] = biomeHolder;
             biomeWrappers[index] = wrappers.getBiome(biomeHolder);
          }
@@ -1040,6 +1058,22 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
          }
       }
       endTimingPhase(trace, "terrainMetrics", phaseStart);
+      if (cellSize > 4) {
+         phaseStart = beginTimingPhase(trace);
+         for (int localZ = 0; localZ < lodSizePoints; localZ++) {
+            int worldZ = worldZs[localZ];
+            int row = localZ * lodSizePoints;
+            for (int localX = 0; localX < lodSizePoints; localX++) {
+               int index = row + localX;
+               if (coverClasses[index] == ESA_SNOW_ICE || visualCoverClasses[index] == ESA_SNOW_ICE) {
+                  long packed = this.generator.sampleLodSnowSlopeShape(worldXs[localX], worldZ);
+                  lodSlopeDiffs[index] = (int)(packed >> 32);
+                  lodConvexities[index] = (int)packed;
+               }
+            }
+         }
+         endTimingPhase(trace, "snowSlopeRefine", phaseStart);
+      }
       byte[] roadClassMask = roadMaskResult.mask();
       boolean emitTimingEnabled = trace.isEnabled();
       long emitClassifyNanos = 0L;
@@ -1076,7 +1110,7 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
             IDhApiBiomeWrapper biome = biomeWrappers[index];
             TellusLodGenerator.CanopyProfile biomeCanopyProfile = canopyProfile(biomeHolder);
             TellusLodGenerator.CanopyProfile sampledCanopyProfile = resolveTreeCoverCanopyProfile(biomeCanopyProfile, coverClass);
-            boolean isMangrove = sampledCanopyProfile.isMangrove() || coverClass == 95;
+            boolean isMangrove = sampledCanopyProfile.isMangrove() || coverClass == ESA_MANGROVES;
             TellusLodGenerator.LodBuildingColumn buildingColumn = buildingColumns == null ? null : buildingColumns[index];
             boolean hasBuilding = buildingColumn != null;
             if (hasBuilding) {
@@ -1445,6 +1479,23 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
          stride = Math.min(stride, 4);
          return Math.min(stride, lodSizePoints);
       }
+   }
+
+   private static boolean shouldSampleVisualCover(EarthGeneratorSettings settings, double previewResolutionMeters) {
+      double worldScale = settings.worldScale();
+      return worldScale > 0.0
+         && worldScale < ESA_WORLD_COVER_RESOLUTION_METERS
+         && effectiveCoverResolutionMeters(worldScale, previewResolutionMeters) < ESA_WORLD_COVER_RESOLUTION_METERS;
+   }
+
+   private static double effectiveCoverResolutionMeters(double worldScale, double previewResolutionMeters) {
+      return Double.isFinite(previewResolutionMeters) && previewResolutionMeters > 0.0
+         ? Math.max(worldScale, previewResolutionMeters)
+         : worldScale;
+   }
+
+   private static boolean isHardRawCoverClass(int coverClass) {
+      return coverClass == ESA_NO_DATA || coverClass == ESA_WATER || coverClass == ESA_MANGROVES || coverClass == ESA_BUILT_UP;
    }
 
    private static int detailedWaterStride(int detailLevel, int lodSizePoints) {
@@ -2071,29 +2122,21 @@ public final class TellusLodGenerator implements IDhApiWorldGenerator {
             }
 
             int highestFloor = blueprint.highestActiveFloor(distance);
-            for (int floorIndex = 0; floorIndex <= highestFloor; floorIndex++) {
-               if (!blueprint.isActiveOnFloor(distance, floorIndex)) {
-                  continue;
-               }
-
-               int spanStart = blueprint.floorBottomY(floorIndex);
-               int spanEnd = Math.min(cellTopY, blueprint.floorTopY(floorIndex));
-               if (spanEnd < spanStart) {
-                  continue;
-               }
-
-               BlockState facadeBlock = TellusBuildingMaterials.resolveLodFacadeBlock(blueprint, palette, distance, floorIndex);
+            int roofStart = Math.max(floorY, blueprint.roofBaseY(distance));
+            int facadeEnd = Math.min(cellTopY, roofStart - 1);
+            if (facadeEnd >= floorY) {
+               int facadeFloor = Math.min(highestFloor, blueprint.floorIndexAtY((floorY + facadeEnd) >> 1));
+               BlockState facadeBlock = TellusBuildingMaterials.resolveLodFacadeBlock(blueprint, palette, distance, facadeFloor);
                column.addSpan(
-                  spanStart,
-                  spanEnd,
+                  floorY,
+                  facadeEnd,
                   facadeBlock,
                   TellusBuildingLighting.resolveLodFacadeLightLevel(
-                     blueprint, facadeBlock, palette.window(), distance, worldXs[localX], worldZs[localZ], floorIndex, cellSize
+                     blueprint, facadeBlock, palette.window(), distance, worldXs[localX], worldZs[localZ], facadeFloor, cellSize
                   )
                );
             }
 
-            int roofStart = Math.max(floorY, blueprint.roofBaseY(distance));
             if (cellTopY >= roofStart) {
                column.addSpan(
                   roofStart,

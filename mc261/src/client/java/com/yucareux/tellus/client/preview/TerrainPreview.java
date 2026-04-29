@@ -518,7 +518,6 @@ public final class TerrainPreview implements AutoCloseable {
             terrainColors,
             detailColors,
             detailHeightOffsets,
-            previewBlockHeights,
             settings,
             minWorldX,
             minWorldZ,
@@ -641,9 +640,8 @@ public final class TerrainPreview implements AutoCloseable {
          roadsPreviewEnabled,
          buildingsPreviewEnabled
       );
-      long buildTotal = (long)size * size
-         + (long)size * size
-         + (long)size * size
+      long gridArea = (long)size * size;
+      long buildTotal = gridArea * 3L
          + (waterPreviewEnabled ? PREVIEW_WATER_OVERLAY_UNITS : 0L)
          + (roadsPreviewEnabled ? PREVIEW_ROAD_OVERLAY_UNITS : 0L)
          + (buildingsPreviewEnabled ? PREVIEW_BUILDING_OVERLAY_UNITS : 0L);
@@ -723,7 +721,7 @@ public final class TerrainPreview implements AutoCloseable {
          return null;
       }
 
-      buildDone += (long)size * size;
+      buildDone += gridArea;
       if (waterPreviewEnabled) {
          if (!this.processWaterPreviewOverlay(
             id,
@@ -732,7 +730,6 @@ public final class TerrainPreview implements AutoCloseable {
             terrainColors,
             detailColors,
             detailHeightOffsets,
-            previewBlockHeights,
             settings,
             snapshot.minWorldX(),
             snapshot.minWorldZ(),
@@ -769,7 +766,7 @@ public final class TerrainPreview implements AutoCloseable {
          return null;
       }
 
-      buildDone += (long)size * size;
+      buildDone += gridArea;
       if (buildingsPreviewEnabled) {
          if (!this.processBuildingPreviewOverlay(
             id,
@@ -971,7 +968,8 @@ public final class TerrainPreview implements AutoCloseable {
       double radius = PREVIEW_RADIUS_BLOCKS;
       int providerGridSize = PREVIEW_INFO_PROVIDER_GRID_SIZE;
       double providerStep = radius * 2.0 / (providerGridSize - 1);
-      double previewResolutionMeters = Math.max(settings.worldScale(), providerStep * settings.worldScale());
+      double imageStep = radius * 2.0 / (PREVIEW_GRID_SIZE - 1);
+      double previewResolutionMeters = Math.max(settings.worldScale(), imageStep * settings.worldScale());
       EnumMap<DemUsage, Integer> primaryCounts = new EnumMap<>(DemUsage.class);
       Map<Integer, Integer> resolutionCounts = new HashMap<>();
       int providerSampleCount = 0;
@@ -1300,7 +1298,6 @@ public final class TerrainPreview implements AutoCloseable {
       int[] terrainColors,
       int[] detailColors,
       float[] detailHeightOffsets,
-      double[] blockHeights,
       EarthGeneratorSettings settings,
       double minWorldX,
       double minWorldZ,
@@ -1358,7 +1355,7 @@ public final class TerrainPreview implements AutoCloseable {
          overlayProgress.finish();
       } else {
          if (!this.overlayWaterPreviewColors(
-            id, terrainColors, detailColors, detailHeightOffsets, blockHeights, settings, minWorldX, minWorldZ, step, features, overlayProgress::updateRaster
+            id, terrainColors, detailColors, detailHeightOffsets, settings, minWorldX, minWorldZ, step, features, overlayProgress::updateRaster
          )) {
             return false;
          }
@@ -1532,7 +1529,6 @@ public final class TerrainPreview implements AutoCloseable {
       int[] terrainColors,
       int[] detailColors,
       float[] detailHeightOffsets,
-      double[] blockHeights,
       EarthGeneratorSettings settings,
       double minWorldX,
       double minWorldZ,
@@ -2004,10 +2000,6 @@ public final class TerrainPreview implements AutoCloseable {
             }
          }
 
-         int separationCells = Math.max(0, (int)Math.round(0.0 / step));
-         int[] accepted = new int[area];
-         int acceptedCount = 0;
-
          for (int ix = 0; ix < area; ix++) {
             if (this.shouldAbortRequest(requestId)) {
                return false;
@@ -2015,31 +2007,7 @@ public final class TerrainPreview implements AutoCloseable {
 
             if (candidates[ix] && !blocked[ix]) {
                selectedClass[ix] = (byte)classId;
-               accepted[acceptedCount++] = ix;
-            }
-         }
-
-         for (int ixx = 0; ixx < acceptedCount; ixx++) {
-            if (this.shouldAbortRequest(requestId)) {
-               return false;
-            }
-
-            int idx = accepted[ixx];
-            int gxx = idx % size;
-            int gz = idx / size;
-
-            for (int dz = -separationCells; dz <= separationCells; dz++) {
-               int z = gz + dz;
-               if (z >= 0 && z < size) {
-                  int row = z * size;
-
-                  for (int dx = -separationCells; dx <= separationCells; dx++) {
-                     int x = gxx + dx;
-                     if (x >= 0 && x < size) {
-                        blocked[row + x] = true;
-                     }
-                  }
-               }
+               blocked[ix] = true;
             }
          }
       }
@@ -3086,7 +3054,6 @@ public final class TerrainPreview implements AutoCloseable {
             int quadCount = quadsX * quadsZ;
             int[] quadTopLeft = new int[quadCount];
             float[] quadDepth = new float[quadCount];
-            boolean[] quadVisible = new boolean[quadCount];
             Vector3f view = new Vector3f();
             Vector3f normal = new Vector3f();
             float depthScale = 0.25F;
@@ -3111,12 +3078,10 @@ public final class TerrainPreview implements AutoCloseable {
                   if (maxZ > -0.05F) {
                      quadTopLeft[quadIndex] = -1;
                      quadDepth[quadIndex] = Float.POSITIVE_INFINITY;
-                     quadVisible[quadIndex] = false;
                   } else {
                      float depth = (v0 + v1 + v2 + v3) * depthScale;
                      quadTopLeft[quadIndex] = idx;
                      quadDepth[quadIndex] = depth;
-                     quadVisible[quadIndex] = true;
                   }
 
                   quadIndex++;
@@ -3135,7 +3100,7 @@ public final class TerrainPreview implements AutoCloseable {
 
             for (int i = 0; i < quadCount; i++) {
                int idx = quadTopLeft[i];
-               if (idx >= 0 && quadVisible[i]) {
+               if (idx >= 0) {
                   int x = idx % this.mesh.size;
                   int z = idx / this.mesh.size;
                   int idxRight = idx + stride;
