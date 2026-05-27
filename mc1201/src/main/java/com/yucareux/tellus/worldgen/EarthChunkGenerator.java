@@ -157,9 +157,9 @@ public final class EarthChunkGenerator extends ChunkGenerator {
    private static final float AXOLOTL_CHUNK_CHANCE = 0.55F;
    private static final float AXOLOTL_POND_CHANCE = 0.68F;
    private static final int MAX_AXOLOTLS_PER_CHUNK = 2;
-   private static final int OSM_ROAD_MAX_SCALE = 15;
+   private static final int OSM_ROAD_MAX_SCALE = 100;
    private static final int OSM_ROAD_QUERY_MARGIN = 64;
-   private static final int OSM_BUILDING_MAX_SCALE = 15;
+   private static final int OSM_BUILDING_MAX_SCALE = 100;
    private static final int OSM_BUILDING_QUERY_MARGIN = 8;
    private static final int OSM_ROAD_CLASS_SEPARATION = 0;
    private static final int OSM_ROAD_BRIDGE_LEVEL_HEIGHT = intProperty("tellus.osm.roads.bridgeLevelHeight", 3, 1, 16);
@@ -1264,7 +1264,7 @@ public final class EarthChunkGenerator extends ChunkGenerator {
                List<RoadFeature> normalBridgeRoads = new ArrayList<>();
                List<RoadFeature> dirtRoads = new ArrayList<>();
                List<RoadFeature> dirtBridgeRoads = new ArrayList<>();
-
+               boolean isLargeScale = worldScale > 49.0;
                for (RoadFeature road : roads) {
                   switch (road.roadClass()) {
                      case MAIN:
@@ -1280,6 +1280,8 @@ public final class EarthChunkGenerator extends ChunkGenerator {
                         }
                         break;
                      case DIRT:
+                        if(isLargeScale)
+                           continue;
                         dirtRoads.add(road);
                         if (road.mode() == RoadMode.BRIDGE) {
                            dirtBridgeRoads.add(road);

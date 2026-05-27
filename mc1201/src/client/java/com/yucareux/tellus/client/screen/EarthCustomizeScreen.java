@@ -100,7 +100,7 @@ public class EarthCustomizeScreen extends Screen {
    private static final ResourceKey<DimensionType> DYNAMIC_DIMENSION_TYPE_KEY = Objects.requireNonNull(
       ResourceKey.create(Registries.DIMENSION_TYPE, DYNAMIC_DIMENSION_TYPE_ID), "dynamicDimensionTypeKey"
    );
-   private static final double OSM_ROADS_AND_BUILDINGS_MAX_WORLD_SCALE = 15.0;
+   private static final double OSM_ROADS_AND_BUILDINGS_MAX_WORLD_SCALE = 100.0;
    private final CreateWorldScreen parent;
    private final List<EarthCustomizeScreen.CategoryDefinition> categories;
    private CustomizationList list;

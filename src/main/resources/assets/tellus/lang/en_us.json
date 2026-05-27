@@ -209,7 +209,7 @@
   "property.tellus.enable_roads.tooltip": "Generate OpenStreetMap road features where data is available",
   "property.tellus.enable_buildings.tooltip": "Generate Overture building footprints and 3D parts where data is available",
   "property.tellus.enable_water.tooltip": "Use Overture/OSM water when enabled. Leave off to keep ESA water",
-  "tellus.openstreetmaps_features.scale_limit_warning": "Roads and buildings are disabled because they are only available when World Scale is 1:15 (15 m/block) or finer.",
-  "property.tellus.enable_roads.scale_limit.tooltip": "Disabled because roads are only available when World Scale is 1:15 (15 m/block) or finer.",
-  "property.tellus.enable_buildings.scale_limit.tooltip": "Disabled because buildings are only available when World Scale is 1:15 (15 m/block) or finer."
+  "tellus.openstreetmaps_features.scale_limit_warning": "Roads and buildings are disabled because they are only available when World Scale is 1:100 (100 m/block) or finer.",
+  "property.tellus.enable_roads.scale_limit.tooltip": "Disabled because roads are only available when World Scale is 1:100 (100 m/block) or finer.",
+  "property.tellus.enable_buildings.scale_limit.tooltip": "Disabled because buildings are only available when World Scale is 1:100 (100 m/block) or finer."
 }
