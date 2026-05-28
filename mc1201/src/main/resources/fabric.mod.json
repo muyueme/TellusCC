@@ -1,15 +1,15 @@
 {
 	"schemaVersion": 1,
-	"id": "tellus",
+	"id": "telluscc",
 	"version": "${version}",
-	"name": "Tellus",
-	"description": "Tellus is a Fabric mod that recreates real-world terrain in Minecraft by generating Earth-scale landscapes from geographic data.",
+	"name": "TellusCC",
+	"description": "TellusCC is a Fabric mod derived from the original Tellus mod. Using geographic data, Tellus generates Earth-scale landscapes to recreate real-world terrain in Minecraft.",
 	"authors": [
-		"Me!"
+		"muyueme"
 	],
 	"contact": {
-		"homepage": "https://github.com/Yucareux/Tellus",
-		"sources": "https://github.com/Yucareux/Tellus"
+		"homepage": "https://github.com/muyueme/TellusCC",
+		"sources": "https://github.com/muyueme/TellusCC"
 	},
 	"license": "LGPL-3.0-only",
 	"icon": "assets/tellus/icon.png",

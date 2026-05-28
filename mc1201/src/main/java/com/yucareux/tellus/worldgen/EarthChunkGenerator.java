@@ -1264,16 +1264,22 @@ public final class EarthChunkGenerator extends ChunkGenerator {
                List<RoadFeature> normalBridgeRoads = new ArrayList<>();
                List<RoadFeature> dirtRoads = new ArrayList<>();
                List<RoadFeature> dirtBridgeRoads = new ArrayList<>();
-               boolean isLargeScale = worldScale > 49.0;
+               boolean isLargeScale = worldScale > 49.0 ,veryLargeScale = worldScale > 75.0;
                for (RoadFeature road : roads) {
                   switch (road.roadClass()) {
                      case MAIN:
+                        if(veryLargeScale && widths.main()<2){
+                           continue;
+                        }
                         mainRoads.add(road);
                         if (road.mode() == RoadMode.BRIDGE) {
                            mainBridgeRoads.add(road);
                         }
                         break;
                      case NORMAL:
+                        if(isLargeScale && widths.normal()<2){
+                           continue;
+                        }
                         normalRoads.add(road);
                         if (road.mode() == RoadMode.BRIDGE) {
                            normalBridgeRoads.add(road);
@@ -2003,11 +2009,13 @@ public final class EarthChunkGenerator extends ChunkGenerator {
          double t = (worldScale - 5.0) / 5.0;
          return Mth.lerp(Mth.clamp(t, 0.0, 1.0), 1.0, 0.5);
       } else if (worldScale <= 50.0) {
-         double t = (worldScale - 25.0) / 25.0;
-         return Mth.lerp(Mth.clamp(t, 0.0, 1.0), 1.5, 1.0);
+//         double t = (worldScale - 10.0) / 40.0;
+//         return Mth.lerp(Mth.clamp(t, 0.0, 1.0), 1.5, 1.0);
+         return 0.25;
       } else if (worldScale <= 100.0) {
-         double t = (worldScale - 50.0) / 50.0;
-         return Mth.lerp(Mth.clamp(t, 0.0, 1.0), 1.2, 1.0);
+//         double t = (worldScale - 50.0) / 50.0;
+//          return Mth.lerp(Mth.clamp(t, 0.0, 1.0), 1.0, 0.5);
+         return 0.25;
       } else {
          return 0.25;
       }
@@ -5596,6 +5604,8 @@ public final class EarthChunkGenerator extends ChunkGenerator {
                Map<String, EarthChunkGenerator.BuildingGroupScratch> groups = new HashMap<>();
                List<EarthChunkGenerator.RasterizedBuildingFeature> partFeatures = new ArrayList<>();
                List<EarthChunkGenerator.RasterizedBuildingFeature> footprintFeatures = new ArrayList<>();
+               boolean isLargeScale = worldScale > 49.0;
+               int minBuildingAreaAllow = this.settings.minBuildingArea();
 
                for (OsmBuildingFeature feature : features) {
                   String groupId = resolveBuildingGroupId(feature);
@@ -5625,6 +5635,10 @@ public final class EarthChunkGenerator extends ChunkGenerator {
 
                   EarthChunkGenerator.RasterizedBuildingFeature rasterized = analyzed.rasterized();
                   if (rasterized != null) {
+                     // 过滤掉占地面积（接触地面方块）小于minBuildingAreaAllow的小型建筑
+                     if (isLargeScale && rasterized.occupiedIndices().length < minBuildingAreaAllow) {
+                        continue;
+                     }
                      for (int index : rasterized.occupiedIndices()) {
                         group.fallbackSamples().add(terrainSurfaces[index]);
                      }
@@ -5736,10 +5750,28 @@ public final class EarthChunkGenerator extends ChunkGenerator {
       boolean collectGroundSamples
    ) {
       double worldScale = this.settings.worldScale();
-      int minX = Math.max(sampleMinX, Mth.floor(feature.minBlockX(blocksPerDegree) - 1.0));
-      int maxX = Math.min(sampleMaxX, Mth.ceil(feature.maxBlockX(blocksPerDegree) + 1.0));
-      int minZ = Math.max(sampleMinZ, Mth.floor(feature.minBlockZ(worldScale) - 1.0));
-      int maxZ = Math.min(sampleMaxZ, Mth.ceil(feature.maxBlockZ(worldScale) + 1.0));
+      // 当 worldScale 在 [16, 100] 范围内时，放大建筑以确保可见
+      // 计算放大因子：worldScale 越大，放大倍数越高
+      double scaleFactor = 1.0;
+//      if (worldScale >= 16 && worldScale <= 100) {
+//         if (worldScale <= 30) {
+//            // [16, 30]: 1.0 -> 2.0 倍（轻微放大）
+//            scaleFactor = 1.0 + (worldScale - 16.0) / 16.0;
+//         } else if (worldScale <= 60) {
+//            // [30, 60]: 2.0 -> 4.0 倍（中等放大）
+//            scaleFactor = 2.0 + (worldScale - 30.0) / 30.0 * 2.0;
+//         } else {
+//            // [60, 100]: 4.0 -> 8.0 倍（强烈放大）
+//            scaleFactor = 4.0 + (worldScale - 60.0) / 40.0 * 4.0;
+//         }
+//      }
+
+      // 使用放大后的 blocksPerDegree 进行坐标转换
+      double scaledBlocksPerDegree = blocksPerDegree * scaleFactor;
+      int minX = Math.max(sampleMinX, Mth.floor(feature.minBlockX(scaledBlocksPerDegree) - 1.0));
+      int maxX = Math.min(sampleMaxX, Mth.ceil(feature.maxBlockX(scaledBlocksPerDegree) + 1.0));
+      int minZ = Math.max(sampleMinZ, Mth.floor(feature.minBlockZ(worldScale)*scaleFactor - 1.0));
+      int maxZ = Math.min(sampleMaxZ, Mth.ceil(feature.maxBlockZ(worldScale)*scaleFactor + 1.0));
       if (maxX < minX || maxZ < minZ) {
          return null;
       } else {
@@ -5767,8 +5799,8 @@ public final class EarthChunkGenerator extends ChunkGenerator {
             double[] zs = new double[pointCount];
 
             for (int point = 0; point < pointCount; point++) {
-               double worldX = feature.lonAt(part, point) * blocksPerDegree - 0.5;
-               double worldZ = EarthProjection.latToBlockZ(feature.latAt(part, point), worldScale) - 0.5;
+               double worldX = feature.lonAt(part, point) * scaledBlocksPerDegree - 0.5;
+               double worldZ = EarthProjection.latToBlockZ(feature.latAt(part, point), worldScale)*scaleFactor - 0.5;
                xs[point] = worldX;
                zs[point] = worldZ;
                rasterMinX = Math.min(rasterMinX, Mth.floor(worldX));

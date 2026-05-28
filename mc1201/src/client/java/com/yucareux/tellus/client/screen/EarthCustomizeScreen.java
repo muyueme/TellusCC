@@ -401,6 +401,7 @@ public class EarthCustomizeScreen extends Screen {
       boolean enableRoads = this.findToggleValue("enable_roads", EarthGeneratorSettings.DEFAULT.enableRoads());
       boolean enableBuildings = this.findToggleValue("enable_buildings", EarthGeneratorSettings.DEFAULT.enableBuildings());
       boolean enableWater = this.findToggleValue("enable_water", EarthGeneratorSettings.DEFAULT.enableWater());
+      int minBuildingArea = (int)Math.floor(this.findSliderValue("min_building_area", EarthGeneratorSettings.DEFAULT.minBuildingArea()));
       boolean deepDark = this.findToggleValue("deep_dark", EarthGeneratorSettings.DEFAULT.deepDark());
       boolean geodes = this.findToggleValue("geodes", EarthGeneratorSettings.DEFAULT.geodes());
       boolean addStrongholds = this.findToggleValue("add_strongholds", EarthGeneratorSettings.DEFAULT.addStrongholds());
@@ -499,7 +500,7 @@ public class EarthCustomizeScreen extends Screen {
          demSelection,
          enableRoads,
          enableBuildings,
-         enableWater
+         enableWater, minBuildingArea
       );
    }
 
@@ -547,6 +548,7 @@ public class EarthCustomizeScreen extends Screen {
       this.setToggleValue("enable_roads", initialSettings.enableRoads());
       this.setToggleValue("enable_buildings", initialSettings.enableBuildings());
       this.setToggleValue("enable_water", initialSettings.enableWater());
+      this.setSliderValue("min_building_area", initialSettings.minBuildingArea());
       this.setToggleValue("deep_dark", initialSettings.deepDark());
       this.setToggleValue("geodes", initialSettings.geodes());
       this.setToggleValue("add_strongholds", initialSettings.addStrongholds());
@@ -789,7 +791,8 @@ public class EarthCustomizeScreen extends Screen {
             List.of(
                toggle("enable_roads", EarthGeneratorSettings.DEFAULT.enableRoads()),
                toggle("enable_buildings", EarthGeneratorSettings.DEFAULT.enableBuildings()),
-               toggle("enable_water", EarthGeneratorSettings.DEFAULT.enableWater())
+               toggle("enable_water", EarthGeneratorSettings.DEFAULT.enableWater()),
+               slider("min_building_area", EarthGeneratorSettings.DEFAULT.minBuildingArea(), 1.0, 10, 1.0).withDisplay(EarthCustomizeScreen::formatBuildingArea)
             )
          )
       );
@@ -926,6 +929,10 @@ public class EarthCustomizeScreen extends Screen {
       );
       categories.add(new EarthCustomizeScreen.CategoryDefinition("data_sources", dataSourcesEntries()));
       return categories;
+   }
+
+   private static String formatBuildingArea(double value) {
+      return String.format(Locale.ROOT, "%.0f m²", value);
    }
 
    private static EarthCustomizeScreen.SliderDefinition slider(String key, double defaultValue, double min, double max, double step) {
