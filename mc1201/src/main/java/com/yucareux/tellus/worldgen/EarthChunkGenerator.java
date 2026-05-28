@@ -2002,6 +2002,12 @@ public final class EarthChunkGenerator extends ChunkGenerator {
       } else if (worldScale <= 10.0) {
          double t = (worldScale - 5.0) / 5.0;
          return Mth.lerp(Mth.clamp(t, 0.0, 1.0), 1.0, 0.5);
+      } else if (worldScale <= 50.0) {
+         double t = (worldScale - 25.0) / 25.0;
+         return Mth.lerp(Mth.clamp(t, 0.0, 1.0), 1.5, 1.0);
+      } else if (worldScale <= 100.0) {
+         double t = (worldScale - 50.0) / 50.0;
+         return Mth.lerp(Mth.clamp(t, 0.0, 1.0), 1.2, 1.0);
       } else {
          return 0.25;
       }
