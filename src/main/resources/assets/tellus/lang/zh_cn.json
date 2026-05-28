@@ -209,6 +209,8 @@
   "property.tellus.enable_roads.tooltip": "在有数据的位置生成 OpenStreetMap 道路",
   "property.tellus.enable_buildings.tooltip": "在有数据的位置生成 Overture 建筑轮廓和 3D 部件",
   "property.tellus.enable_water.tooltip": "启用时使用 Overture/OSM 水域数据。关闭则保留 ESA 水域",
+  "property.tellus.min_building_area.name": "最小建筑面积方块",
+  "property.tellus.min_building_area.tooltip": "允许建筑的最小面积限制（单位：方块），仅在「世界比例尺」为 1:50（50 米/方块）或更大时生效。",
   "tellus.openstreetmaps_features.scale_limit_warning": "道路和建筑已禁用，因为它们仅在「世界比例尺」为 1:100（100 米/方块）或更精细时可用。",
   "property.tellus.enable_roads.scale_limit.tooltip": "已禁用，因为道路仅在「世界比例尺」为 1:100（100 米/方块）或更精细时可用。",
   "property.tellus.enable_buildings.scale_limit.tooltip": "已禁用，因为建筑仅在「世界比例尺」为 1:100（100 米/方块）或更精细时可用。",
