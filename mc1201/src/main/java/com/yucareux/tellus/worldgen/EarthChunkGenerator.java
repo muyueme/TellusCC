@@ -352,6 +352,7 @@ public final class EarthChunkGenerator extends ChunkGenerator {
    private final AtomicBoolean fastSpawnMode = new AtomicBoolean(true);
    private final AtomicLong chunkDetailGenerationSequence = new AtomicLong();
    private final ConcurrentHashMap<Long, Long> terrainGenerationStamps = new ConcurrentHashMap<>();
+   private final boolean isLargeScale;
 
    public EarthChunkGenerator(BiomeSource biomeSource, EarthGeneratorSettings settings) {
       super(biomeSource, biome -> generationSettingsForBiome(biome, settings));
@@ -363,6 +364,7 @@ public final class EarthChunkGenerator extends ChunkGenerator {
       this.waterResolver = TellusWorldgenSources.waterResolver(settings);
       this.remaSnowEnabled = TellusElevationSource.usesPolarDem(settings.demSelection()) && settings.worldScale() > 0.0;
       this.remaSnowBoundaryZ = this.remaSnowEnabled ? TellusElevationSource.remaBoundaryBlockZ(settings.worldScale()) : Double.POSITIVE_INFINITY;
+      this.isLargeScale = settings.worldScale() > 49.0;
       double blocksPerDegree = blocksPerDegree(settings.worldScale());
       int spawnBlockX = Mth.floor(settings.spawnLongitude() * blocksPerDegree);
       int spawnBlockZ = Mth.floor(EarthProjection.latToBlockZ(settings.spawnLatitude(), settings.worldScale()));
@@ -1257,18 +1259,18 @@ public final class EarthChunkGenerator extends ChunkGenerator {
                OsmPerf.recordFullChunkRoad(fetchNs, 0L, 0);
             } else {
                long rasterStartNs = OsmPerf.now();
-               EarthChunkGenerator.RoadWidths widths = resolveRoadWidths(worldScale);
+               EarthChunkGenerator.RoadWidths widths = resolveRoadWidths(worldScale,this.isLargeScale);
                List<RoadFeature> mainRoads = new ArrayList<>();
                List<RoadFeature> mainBridgeRoads = new ArrayList<>();
                List<RoadFeature> normalRoads = new ArrayList<>();
                List<RoadFeature> normalBridgeRoads = new ArrayList<>();
                List<RoadFeature> dirtRoads = new ArrayList<>();
                List<RoadFeature> dirtBridgeRoads = new ArrayList<>();
-               boolean isLargeScale = worldScale > 49.0 ,veryLargeScale = worldScale > 75.0;
+//               boolean isLargeScale = worldScale > 49.0; // ,veryLargeScale = worldScale > 75.0
                for (RoadFeature road : roads) {
                   switch (road.roadClass()) {
                      case MAIN:
-                        if(veryLargeScale && widths.main()<2){
+                        if(isLargeScale && widths.main()<3){
                            continue;
                         }
                         mainRoads.add(road);
@@ -1277,7 +1279,7 @@ public final class EarthChunkGenerator extends ChunkGenerator {
                         }
                         break;
                      case NORMAL:
-                        if(isLargeScale && widths.normal()<2){
+                        if(isLargeScale){
                            continue;
                         }
                         normalRoads.add(road);
@@ -1983,11 +1985,11 @@ public final class EarthChunkGenerator extends ChunkGenerator {
       }
    }
 
-   private static EarthChunkGenerator.RoadWidths resolveRoadWidths(double worldScale) {
+   private static EarthChunkGenerator.RoadWidths resolveRoadWidths(double worldScale,boolean isLargeScale) {
       double factor = roadWidthFactorForScale(worldScale);
-
+      int addition = isLargeScale?1:0;
       return new EarthChunkGenerator.RoadWidths(
-         widthForScale(RoadClass.MAIN.baseWidth(), factor),
+         widthForScale(RoadClass.MAIN.baseWidth(), factor)+ addition,
          widthForScale(RoadClass.NORMAL.baseWidth(), factor),
          widthForScale(RoadClass.DIRT.baseWidth(), factor)
       );
@@ -3476,7 +3478,7 @@ public final class EarthChunkGenerator extends ChunkGenerator {
          Map<Structure, StructureStart> starts = chunk.getAllStarts();
          if (!starts.isEmpty()) {
             Registry<Structure> registry = registryAccess.registryOrThrow(Registries.STRUCTURE);
-            EarthChunkGenerator.RoadWidths roadWidths = roadsActive ? resolveRoadWidths(worldScale) : null;
+            EarthChunkGenerator.RoadWidths roadWidths = roadsActive ? resolveRoadWidths(worldScale,this.isLargeScale) : null;
 
             for (Entry<Structure, StructureStart> entry : starts.entrySet()) {
                StructureStart start = entry.getValue();
@@ -3597,6 +3599,7 @@ public final class EarthChunkGenerator extends ChunkGenerator {
          case NORMAL -> roadWidths.normal();
          case DIRT -> roadWidths.dirt();
       };
+//      int wForScale = isLargeScale?roadWidth:(roadWidth - 1);
       double halfWidth = Math.max(0.5, (roadWidth - 1) * 0.5);
       double minX = structureFootprintMinX(box) - halfWidth;
       double maxX = structureFootprintMaxX(box) + halfWidth;
@@ -5604,7 +5607,7 @@ public final class EarthChunkGenerator extends ChunkGenerator {
                Map<String, EarthChunkGenerator.BuildingGroupScratch> groups = new HashMap<>();
                List<EarthChunkGenerator.RasterizedBuildingFeature> partFeatures = new ArrayList<>();
                List<EarthChunkGenerator.RasterizedBuildingFeature> footprintFeatures = new ArrayList<>();
-               boolean isLargeScale = worldScale > 49.0;
+//               boolean isLargeScale = worldScale > 49.0;
                int minBuildingAreaAllow = this.settings.minBuildingArea();
 
                for (OsmBuildingFeature feature : features) {
